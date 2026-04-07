@@ -1,0 +1,12 @@
+.env
+node_modules/
+__pycache__/
+*.pyc
+outputs/
+frontend/dist/
+frontend/node_modules/
+*.aux
+*.log
+*.out
+*.synctex.gz
+.vite/
