@@ -12,7 +12,10 @@ from typing import Optional
 
 
 # Patterns for detecting LaTeX resume structures
-SECTION_RE = re.compile(r'\\(?:section|subsection)\{([^}]+)\}', re.IGNORECASE)
+# Matches both \section{} and \resheading{} and similar custom commands
+SECTION_RE = re.compile(r'\\(?:section|subsection|resheading|sectiontitle)\{([^}]+)\}', re.IGNORECASE)
+# Matches \ressubheading{company}{location}{title}{dates} (4 args)
+RESSUBHEADING_RE = re.compile(r'\\ressubheading\{([^}]*)\}\{([^}]*)\}\{([^}]*)\}\{([^}]*)\}')
 DATE_RE = re.compile(
     r'(?:'
     r'\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s*\d{4}'
@@ -206,9 +209,10 @@ def parse_experience_section(lines: list[str]) -> list[dict]:
             in_itemize = False
             continue
 
-        # Check for resumeSubheading pattern
+        # Check for resumeSubheading or ressubheading pattern (case-insensitive)
         sub_match = re.search(
-            r'\\resumeSubheading\{([^}]*)\}\{([^}]*)\}\{([^}]*)\}\{([^}]*)\}', stripped
+            r'\\res(?:ubheading|SubHeading)\{([^}]*)\}\{([^}]*)\}\{([^}]*)\}\{([^}]*)\}',
+            stripped, re.IGNORECASE
         )
         if sub_match:
             if current_entry:
@@ -217,10 +221,9 @@ def parse_experience_section(lines: list[str]) -> list[dict]:
                 current_bullets = []
             current_entry = {
                 "company": sub_match.group(1).strip(),
+                "location": sub_match.group(2).strip(),
                 "title": sub_match.group(3).strip(),
-                "dates": sub_match.group(2).strip() + " | " + sub_match.group(4).strip()
-                         if sub_match.group(4).strip() else sub_match.group(2).strip(),
-                "location": sub_match.group(4).strip() if sub_match.group(4).strip() else "",
+                "dates": sub_match.group(4).strip(),
             }
             continue
 
