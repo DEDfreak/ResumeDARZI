@@ -325,16 +325,22 @@ async def generate(request: Request):
                 })}
 
                 # Visual diff
-                try:
-                    base_compile = await compile_latex(base_tex)
-                    if base_compile["pdf_path"]:
-                        diff_result = generate_visual_diff(
-                            base_compile["pdf_path"],
-                            str(output_dir / "resume.pdf"),
-                            output_dir,
-                        )
-                except Exception:
-                    pass
+                tailored_pdf = output_dir / "resume.pdf"
+                if tailored_pdf.exists():
+                    try:
+                        base_compile = await compile_latex(base_tex)
+                        if base_compile["pdf_path"] and Path(base_compile["pdf_path"]).exists():
+                            diff_result = generate_visual_diff(
+                                base_compile["pdf_path"],
+                                str(tailored_pdf),
+                                output_dir,
+                            )
+                    except Exception as e:
+                        # Log but don't fail — visual diff is optional
+                        yield {"event": "progress", "data": json.dumps({
+                            "stage": "compiling", "status": "warning",
+                            "message": f"Visual diff generation skipped: {str(e)[:50]}"
+                        })}
 
             # --- Stage 9: Cover letter (if requested) ---
             cover_letter_text = None
@@ -374,6 +380,14 @@ async def generate(request: Request):
                         "tailored": b["text"],
                     })
 
+            # Only include image paths that actually exist
+            images = {}
+            for img_file in ["original.png", "tailored.png", "diff.png"]:
+                img_path = output_dir / img_file
+                if img_path.exists():
+                    key = img_file.replace(".png", "") + "_image"
+                    images[key] = f"/api/pdf/{folder_name}/{img_file}"
+
             result = {
                 "folder": folder_name,
                 "files": {
@@ -381,11 +395,7 @@ async def generate(request: Request):
                     "pdf": f"/api/pdf/{folder_name}/resume.pdf" if pdf_compiled else None,
                     "cover_letter": f"/api/pdf/{folder_name}/cover_letter.pdf" if generate_cl else None,
                 },
-                "images": {
-                    "original": f"/api/pdf/{folder_name}/original.png",
-                    "tailored": f"/api/pdf/{folder_name}/tailored.png",
-                    "diff": f"/api/pdf/{folder_name}/diff.png",
-                },
+                "images": images,
                 "ats_report": ats_report,
                 "validation": validation_results,
                 "changes": changes,
