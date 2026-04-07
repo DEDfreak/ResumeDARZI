@@ -577,11 +577,19 @@ def apply_edits(original_tex: str, parsed_original: dict, parsed_edited: dict) -
                     orig_map[b["id"]] = b["text"]
 
     # Replace each changed bullet in the tex source
+    # Use regex to match \item followed by the old text, preserve \item command
     for bid, new_text in edit_map.items():
         old_text = orig_map.get(bid)
         if old_text and old_text != new_text:
-            # Escape special regex chars in old_text for safe replacement
-            result = result.replace(old_text, new_text, 1)
+            # Match \item followed by optional whitespace and the old text
+            # This preserves the \item command and surrounding structure
+            pattern = r'(\\item\s*)' + re.escape(old_text)
+            replacement = r'\1' + new_text
+            result = re.sub(pattern, replacement, result, count=1)
+
+            # Fallback: if regex doesn't match, try simple replacement
+            if old_text not in result and old_text in original_tex:
+                result = result.replace(old_text, new_text, 1)
 
     # Handle skills section edits
     for sec in parsed_edited.get("sections", []):

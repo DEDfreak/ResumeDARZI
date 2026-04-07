@@ -70,6 +70,7 @@ RULES (non-negotiable):
 8. Do not invent achievements, metrics, or technologies the candidate didn't have.
 9. Only swap or add technologies that are genuinely similar to what's already there.
 10. Return the full modified resume JSON with the same structure as the input.
+11. Each bullet text is JUST THE TEXT - do not include LaTeX commands like \\item, \\setlength, or braces in the text itself. The framework will handle LaTeX formatting.
 
 The job is a {jd_signals.get('seniority_level', 'mid-level')} role in {jd_signals.get('domain', 'software engineering')}.
 Tech stack mentioned: {json.dumps(jd_signals.get('tech_stack', []))}

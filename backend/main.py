@@ -411,6 +411,59 @@ async def generate(request: Request):
     return EventSourceResponse(event_stream())
 
 
+# --- LaTeX Validation ---
+
+@app.post("/api/validate-latex")
+async def validate_latex(request: Request):
+    """Validate and compile LaTeX, return detailed error report."""
+    data = await request.json()
+    tex_content = data.get("tex_content", "")
+
+    if not tex_content:
+        raise HTTPException(400, "tex_content is required")
+
+    from backend.latex_validator import validate_and_compile, get_latex_diagnostics, check_chktex_available
+
+    # Get structure diagnostics first
+    diagnostics = get_latex_diagnostics(tex_content)
+
+    # Try to compile and validate
+    result = await validate_and_compile(tex_content)
+
+    return {
+        "diagnostics": diagnostics,
+        "chktex_available": check_chktex_available(),
+        "chktex": result.get("chktex"),
+        "compilation": result.get("compilation"),
+        "has_errors": result.get("has_errors", False),
+    }
+
+
+@app.get("/api/validate/{folder}/{filename}")
+async def validate_output_file(folder: str, filename: str):
+    """Validate a generated resume file."""
+    file_path = OUTPUTS_DIR / folder / filename
+
+    if not file_path.exists():
+        raise HTTPException(404, "File not found")
+
+    if not filename.endswith(".tex"):
+        raise HTTPException(400, "Only .tex files can be validated")
+
+    tex_content = file_path.read_text(encoding="utf-8")
+
+    from backend.latex_validator import validate_and_compile, get_latex_diagnostics
+
+    diagnostics = get_latex_diagnostics(tex_content)
+    compile_result = await validate_and_compile(tex_content)
+
+    return {
+        "file": filename,
+        "diagnostics": diagnostics,
+        "compilation": compile_result,
+    }
+
+
 # --- Output browsing ---
 
 @app.get("/api/history")
