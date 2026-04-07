@@ -182,8 +182,20 @@ def gate4_ats_score(
     """
     def score(texts: list[str], keywords: list[str]) -> tuple[float, list[str], list[str]]:
         combined = " ".join(texts).lower()
-        matched = [kw for kw in keywords if kw.lower() in combined]
-        missed = [kw for kw in keywords if kw.lower() not in combined]
+        matched = []
+        missed = []
+
+        for kw in keywords:
+            kw_lower = kw.lower().strip()
+            # Try exact match first
+            if kw_lower in combined:
+                matched.append(kw)
+            # Try word-by-word match for multi-word keywords (e.g., "machine learning" → "machine" AND "learning")
+            elif all(word in combined for word in kw_lower.split()):
+                matched.append(kw)
+            else:
+                missed.append(kw)
+
         pct = len(matched) / len(keywords) if keywords else 1.0
         return pct, matched, missed
 
