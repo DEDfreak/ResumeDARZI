@@ -1,6 +1,6 @@
 """
 All Gemini API calls — two-pass tailoring logic + JD extraction.
-Uses gemini-1.5-flash only (free tier).
+Uses gemini-2.5-flash only (free tier).
 """
 
 import json
@@ -17,7 +17,7 @@ def get_model():
     if not api_key:
         raise ValueError("Gemini API key not configured. Set it in Settings or .env file.")
     genai.configure(api_key=api_key)
-    return genai.GenerativeModel("gemini-1.5-flash")
+    return genai.GenerativeModel("gemini-2.5-flash")
 
 
 async def call_gemini(prompt: str, max_retries: int = 3) -> str:
@@ -66,7 +66,7 @@ RULES (non-negotiable):
 4. Integrate these nice-to-have keywords where they genuinely fit: {json.dumps(jd_signals.get('nice_to_have_keywords', []))}
 5. Every bullet must start with a strong past-tense action verb.
 6. Never use these banned words: {json.dumps(banned_words)}
-7. Every bullet must be substantial — aim to fill the full line width.
+7. Every bullet must be substantial and well-expanded (15-25 words minimum) to avoid wasting whitespace. Each bullet should fill at least 75% of the line width when formatted.
 8. Do not invent achievements, metrics, or technologies the candidate didn't have.
 9. Only swap or add technologies that are genuinely similar to what's already there.
 10. Return the full modified resume JSON with the same structure as the input.
@@ -100,10 +100,11 @@ A bullet sounds AI-generated if it:
 - Uses any of these banned words: {json.dumps(banned_words)}
 - Doesn't match the candidate's natural writing rhythm: {json.dumps(style_fingerprint)}
 - Sounds like it's from a LinkedIn influencer, not a working engineer
+- Is too short and wastes whitespace (should be 15-25+ words to fill at least 75% of line width)
 
 Review the following resume JSON. For each bullet with status "EDITABLE":
-1. If it sounds natural and human, keep it unchanged.
-2. If it sounds AI-generated, rewrite it to sound natural in the candidate's voice.
+1. If it sounds natural, human, and substantial (fills the line well), keep it unchanged.
+2. If it sounds AI-generated OR is too short, rewrite it to sound natural in the candidate's voice and expand to fill the line better.
 
 IMPORTANT: Return ONLY the full modified resume JSON. Same structure. No markdown, no explanation.
 
