@@ -165,11 +165,19 @@ export default function ResumeConfiguration() {
   const sections = parsed?.sections || [];
   const header = parsed?.header || {};
 
-  const totalBullets = sections.reduce((acc, sec) => {
-    if (sec.type === 'experience') return acc + sec.entries.reduce((a, e) => a + e.bullets.length, 0);
-    if (sec.type === 'projects') return acc + sec.projects.reduce((a, p) => a + p.bullets.length, 0);
-    return acc;
-  }, 0);
+  const summaryParts = sections.map(sec => {
+    if (sec.type === 'experience') {
+      const bullets = sec.entries.reduce((a, e) => a + e.bullets.length, 0);
+      return `${sec.entries.length} companies · ${bullets} bullets`;
+    }
+    if (sec.type === 'projects') {
+      const bullets = sec.projects.reduce((a, p) => a + p.bullets.length, 0);
+      return `${sec.projects.length} projects · ${bullets} bullets`;
+    }
+    if (sec.type === 'skills') return `${sec.skills.length} skill categories`;
+    if (sec.type === 'education') return `${sec.entries.length} education`;
+    return null;
+  }).filter(Boolean);
 
   const overrideCount = Object.keys(bulletOverrides).length + Object.keys(skillOverrides).length
     + Object.keys(techStackOverrides).length + (summaryOverride !== null ? 1 : 0);
@@ -247,8 +255,9 @@ export default function ResumeConfiguration() {
                   .filter(Boolean).join(' · ')}
               </div>
               <div className="resume-meta-stats">
-                <span className="meta-stat">{sections.length} sections</span>
-                <span className="meta-stat">{totalBullets} bullets</span>
+                {summaryParts.map((part, i) => (
+                  <span key={i} className="meta-stat">{part}</span>
+                ))}
                 {lockedCount > 0 && (
                   <span className="meta-stat meta-stat-locked">{lockedCount} user-locked</span>
                 )}

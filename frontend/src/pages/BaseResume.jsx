@@ -233,6 +233,13 @@ export default function BaseResume() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             {resumes.map((r) => {
               const isActive = r.slug === activeSlug;
+              const summaryText = r.summary
+                ? [
+                    r.summary.experience && `${r.summary.experience.entries} exp (${r.summary.experience.bullets} bullets)`,
+                    r.summary.projects && `${r.summary.projects.count} projects (${r.summary.projects.bullets} bullets)`,
+                    r.summary.skills && `${r.summary.skills.categories} skill categories`,
+                  ].filter(Boolean).join(' · ')
+                : `${r.bullet_count} bullets`;
               return (
                 <div
                   key={r.slug}
@@ -257,7 +264,7 @@ export default function BaseResume() {
                       )}
                     </div>
                     <div style={{ fontSize: 12, color: '#86868b', marginTop: 2 }}>
-                      {r.filename} · {r.bullet_count} bullets
+                      {r.filename} · {summaryText}
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>

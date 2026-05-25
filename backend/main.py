@@ -91,10 +91,25 @@ def _get_resume_item(slug: str) -> dict:
     prefs_path = _prefs_path(slug)
     display_name = slug.replace("_", " ").title()
     bullet_count = 0
+    summary = {}
     if tex_path.exists():
         try:
             parsed = parse_resume(tex_path.read_text(encoding="utf-8"))
             bullet_count = len(get_editable_bullets(parsed))
+            for sec in parsed.get("sections", []):
+                t = sec.get("type")
+                if t == "experience":
+                    entries = sec.get("entries", [])
+                    bullets = sum(len(e.get("bullets", [])) for e in entries)
+                    summary["experience"] = {"entries": len(entries), "bullets": bullets}
+                elif t == "projects":
+                    projects = sec.get("projects", [])
+                    bullets = sum(len(p.get("bullets", [])) for p in projects)
+                    summary["projects"] = {"count": len(projects), "bullets": bullets}
+                elif t == "skills":
+                    summary["skills"] = {"categories": len(sec.get("skills", []))}
+                elif t == "education":
+                    summary["education"] = {"entries": len(sec.get("entries", []))}
         except Exception:
             pass
     if prefs_path.exists():
@@ -108,6 +123,7 @@ def _get_resume_item(slug: str) -> dict:
         "display_name": display_name,
         "filename": f"{slug}.tex",
         "bullet_count": bullet_count,
+        "summary": summary,
     }
 
 
