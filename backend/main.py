@@ -3,6 +3,7 @@ FastAPI application — all routes for ResumeTailor.
 """
 
 import json
+import re
 import asyncio
 from pathlib import Path
 from typing import AsyncGenerator
@@ -44,7 +45,182 @@ async def health():
     }
 
 
-# --- Resume Upload ---
+# --- Slug helpers ---
+
+def _to_slug(filename: str) -> str:
+    name = Path(filename).stem
+    name = re.sub(r'[^a-z0-9]+', '_', name.lower()).strip('_')
+    return name or "resume"
+
+
+def _prefs_dir() -> Path:
+    d = BASE_RESUME_DIR / "preferences"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _prefs_path(slug: str) -> Path:
+    return _prefs_dir() / f"{slug}.json"
+
+
+def _active_path() -> Path:
+    return BASE_RESUME_DIR / "active.json"
+
+
+def _get_active_slug() -> str | None:
+    p = _active_path()
+    if p.exists():
+        try:
+            return json.loads(p.read_text(encoding="utf-8")).get("slug")
+        except (json.JSONDecodeError, IOError):
+            pass
+    return None
+
+
+def _migrate_old_prefs_if_needed():
+    """If old preferences.json exists and new one doesn't, migrate it."""
+    old_prefs = BASE_RESUME_DIR / "preferences.json"
+    new_prefs = _prefs_path("resume")
+    if old_prefs.exists() and not new_prefs.is_file():
+        new_prefs.write_text(old_prefs.read_text(encoding="utf-8"), encoding="utf-8")
+        old_prefs.unlink()
+
+
+def _get_resume_item(slug: str) -> dict:
+    tex_path = BASE_RESUME_DIR / f"{slug}.tex"
+    prefs_path = _prefs_path(slug)
+    display_name = slug.replace("_", " ").title()
+    bullet_count = 0
+    if tex_path.exists():
+        try:
+            parsed = parse_resume(tex_path.read_text(encoding="utf-8"))
+            bullet_count = len(get_editable_bullets(parsed))
+        except Exception:
+            pass
+    if prefs_path.exists():
+        try:
+            prefs = json.loads(prefs_path.read_text(encoding="utf-8"))
+            display_name = prefs.get("display_name", display_name)
+        except (json.JSONDecodeError, IOError):
+            pass
+    return {
+        "slug": slug,
+        "display_name": display_name,
+        "filename": f"{slug}.tex",
+        "bullet_count": bullet_count,
+    }
+
+
+# --- Multi-resume management ---
+
+@app.get("/api/resumes")
+async def list_resumes():
+    """List all .tex files in base_resume/, with migration of old preferences."""
+    _migrate_old_prefs_if_needed()
+    items = []
+    for tex_file in sorted(BASE_RESUME_DIR.glob("*.tex")):
+        slug = _to_slug(tex_file.name)
+        items.append(_get_resume_item(slug))
+    return items
+
+
+@app.post("/api/resumes/upload")
+async def upload_resume_multi(file: UploadFile = File(...)):
+    """Upload a new .tex file, stored by slug."""
+    if not file.filename.endswith(".tex"):
+        raise HTTPException(400, "Only .tex files are accepted.")
+
+    content = await file.read()
+    tex_text = content.decode("utf-8")
+
+    slug = _to_slug(file.filename)
+    save_path = BASE_RESUME_DIR / f"{slug}.tex"
+    save_path.write_text(tex_text, encoding="utf-8")
+
+    try:
+        parsed = parse_resume(tex_text)
+        get_editable_bullets(parsed)
+    except Exception as e:
+        save_path.unlink(missing_ok=True)
+        raise HTTPException(400, f"Error parsing LaTeX: {e}")
+
+    return _get_resume_item(slug)
+
+
+@app.delete("/api/resumes/{slug}")
+async def delete_resume(slug: str):
+    """Delete a resume .tex and its preferences file."""
+    tex_path = BASE_RESUME_DIR / f"{slug}.tex"
+    if not tex_path.exists():
+        raise HTTPException(404, "Resume not found.")
+    tex_path.unlink()
+    prefs = _prefs_path(slug)
+    if prefs.exists():
+        prefs.unlink()
+    # If this was the active resume, clear it
+    active = _get_active_slug()
+    if active == slug:
+        _active_path().write_text(json.dumps({"slug": None}), encoding="utf-8")
+    return {"status": "deleted", "slug": slug}
+
+
+@app.get("/api/resumes/{slug}/parsed")
+async def get_resume_parsed(slug: str):
+    """Return the full parsed resume structure for a given slug."""
+    tex_path = BASE_RESUME_DIR / f"{slug}.tex"
+    if not tex_path.exists():
+        raise HTTPException(404, f"Resume '{slug}' not found.")
+    parsed = parse_resume(tex_path.read_text(encoding="utf-8"))
+    return parsed
+
+
+@app.get("/api/resumes/{slug}/preferences")
+async def get_resume_preferences(slug: str):
+    """Return preferences JSON for a given slug."""
+    prefs_path = _prefs_path(slug)
+    if prefs_path.exists():
+        try:
+            return json.loads(prefs_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, IOError):
+            pass
+    slug_display = slug.replace("_", " ").title()
+    return {"display_name": slug_display, "bullets": {}, "skill_categories": {}, "summary": None}
+
+
+@app.post("/api/resumes/{slug}/preferences")
+async def save_resume_preferences(slug: str, request: Request):
+    """Save preferences JSON for a given slug."""
+    tex_path = BASE_RESUME_DIR / f"{slug}.tex"
+    if not tex_path.exists():
+        raise HTTPException(404, f"Resume '{slug}' not found.")
+    data = await request.json()
+    _prefs_path(slug).write_text(json.dumps(data, indent=2), encoding="utf-8")
+    return {"status": "saved"}
+
+
+# --- Active resume ---
+
+@app.get("/api/active-resume")
+async def get_active_resume():
+    """Return the currently active resume slug."""
+    slug = _get_active_slug()
+    return {"slug": slug}
+
+
+@app.post("/api/active-resume")
+async def set_active_resume(request: Request):
+    """Set the active resume by slug."""
+    data = await request.json()
+    slug = data.get("slug")
+    if slug:
+        tex_path = BASE_RESUME_DIR / f"{slug}.tex"
+        if not tex_path.exists():
+            raise HTTPException(404, f"Resume '{slug}' not found.")
+    _active_path().write_text(json.dumps({"slug": slug}, indent=2), encoding="utf-8")
+    return {"status": "saved", "slug": slug}
+
+
+# --- Legacy Resume Upload ---
 
 @app.post("/api/upload-resume")
 async def upload_resume(file: UploadFile = File(...)):
