@@ -13,12 +13,26 @@ const STAGES = [
   { key: 'cover_letter', label: 'Cover letter' },
 ];
 
+const SELECT_STYLE = {
+  width: '100%',
+  padding: '10px 14px',
+  border: '1px solid #d2d2d7',
+  borderRadius: 8,
+  fontSize: 14,
+  background: '#fafafa',
+  fontFamily: 'inherit',
+  cursor: 'pointer',
+};
+
 export default function Home() {
   const navigate = useNavigate();
 
   const [resumes, setResumes] = useState([]);
   const [activeSlug, setActiveSlug] = useState(null);
+  const [activeConfigId, setActiveConfigId] = useState(null);
+  const [configs, setConfigs] = useState([]);
   const [loadingResumes, setLoadingResumes] = useState(true);
+  const [loadingConfigs, setLoadingConfigs] = useState(false);
   const [jdText, setJdText] = useState('');
   const [jdUrl, setJdUrl] = useState('');
   const [companyName, setCompanyName] = useState('');
@@ -28,7 +42,7 @@ export default function Home() {
   const [progress, setProgress] = useState({});
   const [error, setError] = useState('');
 
-  // Load resumes and active slug
+  // Load resumes and active state
   useEffect(() => {
     Promise.all([
       fetch('/api/resumes').then(r => r.json()),
@@ -36,23 +50,51 @@ export default function Home() {
     ])
       .then(([resumeList, activeData]) => {
         setResumes(resumeList);
-        setActiveSlug(activeData.slug || (resumeList[0]?.slug ?? null));
+        const slug = activeData.slug || resumeList[0]?.slug || null;
+        setActiveSlug(slug);
+        setActiveConfigId(activeData.config_id || null);
       })
-      .catch(() => { setError('Failed to load resumes.'); })
+      .catch(() => setError('Failed to load resumes.'))
       .finally(() => setLoadingResumes(false));
   }, []);
 
+  // Load configs when active slug changes
+  useEffect(() => {
+    if (!activeSlug) { setConfigs([]); return; }
+    setLoadingConfigs(true);
+    fetch(`/api/resumes/${activeSlug}/configurations`)
+      .then(r => r.json())
+      .then(list => setConfigs(list))
+      .catch(() => setConfigs([]))
+      .finally(() => setLoadingConfigs(false));
+  }, [activeSlug]);
+
   const handleResumeChange = async (slug) => {
     setActiveSlug(slug);
+    setActiveConfigId(null);
     setError('');
     try {
       await fetch('/api/active-resume', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ slug }),
+        body: JSON.stringify({ slug, config_id: null }),
       });
     } catch {
       setError('Failed to set active resume.');
+    }
+  };
+
+  const handleConfigChange = async (configId) => {
+    setActiveConfigId(configId || null);
+    setError('');
+    try {
+      await fetch('/api/active-resume', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slug: activeSlug, config_id: configId || null }),
+      });
+    } catch {
+      setError('Failed to set active configuration.');
     }
   };
 
@@ -126,19 +168,20 @@ export default function Home() {
   };
 
   const activeResume = resumes.find(r => r.slug === activeSlug);
+  const activeConfig = configs.find(c => c.id === activeConfigId);
   const canGenerate = activeSlug && companyName.trim() && jobTitle.trim() && (jdText.trim() || jdUrl.trim());
 
   return (
     <div>
       <div className="page-header">
         <h2>Tailor Your Resume</h2>
-        <p>Select a base resume and paste a job description to get started.</p>
+        <p>Select a resume and configuration, then paste a job description to get started.</p>
       </div>
 
       {error && <div className="message message-error">{error}</div>}
 
       <div className="two-col">
-        {/* Left: Resume selector */}
+        {/* Left: Resume + Config selector */}
         <div className="card">
           <h3>Base Resume</h3>
           {loadingResumes ? (
@@ -155,21 +198,8 @@ export default function Home() {
           ) : (
             <>
               <div className="form-group">
-                <label>Select Resume</label>
-                <select
-                  value={activeSlug || ''}
-                  onChange={(e) => handleResumeChange(e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '10px 14px',
-                    border: '1px solid #d2d2d7',
-                    borderRadius: 8,
-                    fontSize: 14,
-                    background: '#fafafa',
-                    fontFamily: 'inherit',
-                    cursor: 'pointer',
-                  }}
-                >
+                <label>Resume</label>
+                <select value={activeSlug || ''} onChange={(e) => handleResumeChange(e.target.value)} style={SELECT_STYLE}>
                   {resumes.map(r => (
                     <option key={r.slug} value={r.slug}>
                       {r.display_name} — {r.bullet_count} bullets
@@ -177,15 +207,50 @@ export default function Home() {
                   ))}
                 </select>
               </div>
+
+              <div className="form-group">
+                <label>Configuration</label>
+                {loadingConfigs ? (
+                  <p style={{ fontSize: 13, color: '#86868b', margin: 0 }}>Loading configurations...</p>
+                ) : configs.length === 0 ? (
+                  <div>
+                    <p style={{ fontSize: 13, color: '#86868b', margin: '0 0 6px' }}>
+                      No configurations yet — all bullets will be editable.
+                    </p>
+                    <Link
+                      to={`/resume-configuration?slug=${activeSlug}`}
+                      style={{ fontSize: 13, color: '#0071e3' }}
+                    >
+                      Create a configuration →
+                    </Link>
+                  </div>
+                ) : (
+                  <select
+                    value={activeConfigId || ''}
+                    onChange={(e) => handleConfigChange(e.target.value)}
+                    style={SELECT_STYLE}
+                  >
+                    <option value="">— No configuration (all editable) —</option>
+                    {configs.map(c => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}{c.locked_count > 0 ? ` (${c.locked_count} locked)` : ''}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
               {activeResume && (
                 <p style={{ fontSize: 12, color: '#86868b' }}>
-                  {activeResume.filename} · {activeResume.bullet_count} bullets ·{' '}
-                  <Link to="/resume-configuration" style={{ color: '#0071e3' }}>
-                    Configure lock/edit preferences →
+                  {activeResume.filename} · {activeResume.bullet_count} bullets
+                  {activeConfig && ` · config: ${activeConfig.name}`}
+                  {' · '}
+                  <Link to={`/resume-configuration?slug=${activeSlug}`} style={{ color: '#0071e3' }}>
+                    Manage configurations →
                   </Link>
                 </p>
               )}
-              <p style={{ fontSize: 12, color: '#86868b', marginTop: 8 }}>
+              <p style={{ fontSize: 12, color: '#86868b', marginTop: 6 }}>
                 <Link to="/base-resume" style={{ color: '#0071e3' }}>
                   Manage resumes →
                 </Link>

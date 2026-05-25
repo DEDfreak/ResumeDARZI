@@ -28,20 +28,282 @@ function BulletRow({ bullet, override, onToggle }) {
   );
 }
 
+// --- Config editor (shown when creating or editing a config) ---
+function ConfigEditor({ parsed, initial, onSave, onCancel, saving }) {
+  const [name, setName] = useState(initial?.name || '');
+  const [bulletOverrides, setBulletOverrides] = useState(initial?.bullets || {});
+  const [skillOverrides, setSkillOverrides] = useState(initial?.skill_categories || {});
+  const [techStackOverrides, setTechStackOverrides] = useState(initial?.tech_stacks || {});
+  const [summaryOverride, setSummaryOverride] = useState(initial?.summary ?? null);
+
+  const toggleBullet = useCallback((id, currentEffective, defaultStatus = 'EDITABLE') => {
+    const next = currentEffective === 'LOCKED' ? 'EDITABLE' : 'LOCKED';
+    setBulletOverrides(prev => {
+      const updated = { ...prev };
+      if (next === defaultStatus) delete updated[id];
+      else updated[id] = next;
+      return updated;
+    });
+  }, []);
+
+  const toggleSkill = useCallback((cat, currentEffective, defaultStatus = 'EDITABLE') => {
+    const next = currentEffective === 'LOCKED' ? 'EDITABLE' : 'LOCKED';
+    setSkillOverrides(prev => {
+      const updated = { ...prev };
+      if (next === defaultStatus) delete updated[cat];
+      else updated[cat] = next;
+      return updated;
+    });
+  }, []);
+
+  const toggleTechStack = useCallback((company, currentEffective, defaultStatus = 'LOCKED') => {
+    const next = currentEffective === 'LOCKED' ? 'EDITABLE' : 'LOCKED';
+    setTechStackOverrides(prev => {
+      const updated = { ...prev };
+      if (next === defaultStatus) delete updated[company];
+      else updated[company] = next;
+      return updated;
+    });
+  }, []);
+
+  const toggleSummary = useCallback((currentEffective, defaultStatus = 'EDITABLE') => {
+    const next = currentEffective === 'LOCKED' ? 'EDITABLE' : 'LOCKED';
+    setSummaryOverride(next === defaultStatus ? null : next);
+  }, []);
+
+  const handleSave = () => {
+    onSave({
+      name: name.trim() || 'Untitled',
+      bullets: bulletOverrides,
+      skill_categories: skillOverrides,
+      tech_stacks: techStackOverrides,
+      summary: summaryOverride,
+    });
+  };
+
+  const sections = parsed?.sections || [];
+
+  return (
+    <div>
+      {/* Config name */}
+      <div className="card">
+        <div className="form-group" style={{ marginBottom: 16 }}>
+          <label>Configuration Name</label>
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="e.g. ML Focus, Frontend, General"
+            autoFocus
+          />
+        </div>
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+          <button className="btn btn-secondary" onClick={onCancel}>Cancel</button>
+          <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
+            {saving ? 'Saving...' : 'Save Configuration'}
+          </button>
+        </div>
+      </div>
+
+      {/* Sections */}
+      {sections.map((sec, si) => {
+        if (sec.type === 'experience') {
+          return (
+            <div key={si} className="card">
+              <h3 className="section-title">Work Experience</h3>
+              {sec.entries.map((entry, ei) => (
+                <div key={ei} className="exp-entry">
+                  <div className="exp-header">
+                    <span className="exp-company">{cleanLocked(entry.company)}</span>
+                    <span className="exp-title">{cleanLocked(entry.title)}</span>
+                    <span className="exp-dates">{cleanLocked(entry.dates)}</span>
+                  </div>
+                  <div className="bullets-list">
+                    {entry.bullets.map((b) => (
+                      <BulletRow
+                        key={b.id}
+                        bullet={b}
+                        override={bulletOverrides[b.id] ?? null}
+                        onToggle={() => toggleBullet(b.id, bulletOverrides[b.id] ?? b.status, b.status)}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          );
+        }
+
+        if (sec.type === 'projects') {
+          return (
+            <div key={si} className="card">
+              <h3 className="section-title">Projects</h3>
+              {sec.projects.map((proj, pi) => (
+                <div key={pi} className="exp-entry">
+                  <div className="exp-header">
+                    <span className="exp-company">{cleanLocked(proj.name)}</span>
+                    {proj.dates && <span className="exp-dates">{cleanLocked(proj.dates)}</span>}
+                  </div>
+                  <div className="bullets-list">
+                    {proj.bullets.map((b) => (
+                      <BulletRow
+                        key={b.id}
+                        bullet={b}
+                        override={bulletOverrides[b.id] ?? null}
+                        onToggle={() => toggleBullet(b.id, bulletOverrides[b.id] ?? b.status, b.status)}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          );
+        }
+
+        if (sec.type === 'skills') {
+          return (
+            <div key={si} className="card">
+              <h3 className="section-title">Skills</h3>
+              <div className="bullets-list">
+                {sec.skills.map((skill, ski) => {
+                  const cat = cleanLocked(skill.category);
+                  const effective = skillOverrides[cat] ?? skill.status;
+                  return (
+                    <div key={ski} className={`bullet-row ${effective === 'LOCKED' ? 'bullet-row-locked' : ''}`}>
+                      <StatusBadge status={effective} onToggle={() => toggleSkill(cat, effective, skill.status)} />
+                      <span className="bullet-text">
+                        {cat && <strong>{cat}: </strong>}
+                        {skill.items}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        }
+
+        if (sec.type === 'summary') {
+          const defaultSummaryStatus = sec.status ?? 'EDITABLE';
+          const effective = summaryOverride ?? defaultSummaryStatus;
+          return (
+            <div key={si} className="card">
+              <h3 className="section-title">Summary</h3>
+              <div className={`bullet-row ${effective === 'LOCKED' ? 'bullet-row-locked' : ''}`}>
+                <StatusBadge status={effective} onToggle={() => toggleSummary(effective, defaultSummaryStatus)} />
+                <span className="bullet-text">{sec.text}</span>
+              </div>
+            </div>
+          );
+        }
+
+        return null;
+      })}
+
+      {/* Tech Stack section */}
+      {(() => {
+        const expSec = sections.find(s => s.type === 'experience');
+        const techEntries = expSec ? expSec.entries.filter(e => cleanLocked(e.tech_stack)) : [];
+        if (techEntries.length === 0) return null;
+        return (
+          <div className="card">
+            <h3 className="section-title">Tech Stack</h3>
+            <div className="bullets-list">
+              {techEntries.map((entry, i) => {
+                const company = cleanLocked(entry.company);
+                const effective = techStackOverrides[company] ?? 'LOCKED';
+                return (
+                  <div key={i} className={`bullet-row ${effective === 'LOCKED' ? 'bullet-row-locked' : ''}`}>
+                    <StatusBadge status={effective} onToggle={() => toggleTechStack(company, effective, 'LOCKED')} />
+                    <span className="bullet-text">
+                      <strong>{company}</strong>: {cleanLocked(entry.tech_stack)}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Sticky save bar */}
+      <div className="save-bar">
+        <span>
+          {Object.keys(bulletOverrides).length + Object.keys(skillOverrides).length +
+           Object.keys(techStackOverrides).length + (summaryOverride !== null ? 1 : 0)} preferences set
+        </span>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button className="btn btn-secondary" onClick={onCancel}>Cancel</button>
+          <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
+            {saving ? 'Saving...' : 'Save Configuration'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --- Config list card ---
+function ConfigCard({ config, isActive, onEdit, onDelete, onSetActive }) {
+  return (
+    <div style={{
+      display: 'flex',
+      alignItems: 'center',
+      gap: 12,
+      padding: '14px 16px',
+      borderRadius: 10,
+      border: isActive ? '1.5px solid #0071e3' : '1px solid #e5e5ea',
+      background: isActive ? 'rgba(0,113,227,0.03)' : '#fafafa',
+      marginBottom: 10,
+    }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontWeight: 600, fontSize: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
+          {config.name}
+          {isActive && (
+            <span className="meta-stat" style={{ background: 'rgba(0,113,227,0.1)', color: '#0071e3', fontSize: 11 }}>
+              Active
+            </span>
+          )}
+        </div>
+        <div style={{ fontSize: 12, color: '#86868b', marginTop: 2 }}>
+          {config.locked_count > 0 ? `${config.locked_count} locked` : 'All editable'}
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+        {!isActive && (
+          <button className="btn btn-secondary" style={{ fontSize: 12, padding: '6px 14px' }} onClick={onSetActive}>
+            Set Active
+          </button>
+        )}
+        <button className="btn btn-secondary" style={{ fontSize: 12, padding: '6px 14px' }} onClick={onEdit}>
+          Edit
+        </button>
+        <button
+          className="btn btn-secondary"
+          style={{ fontSize: 12, padding: '6px 14px', color: '#ff3b30', borderColor: 'rgba(255,59,48,0.3)' }}
+          onClick={onDelete}
+        >
+          Delete
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// --- Main page ---
 export default function ResumeConfiguration() {
   const [searchParams] = useSearchParams();
+
   const [resumes, setResumes] = useState([]);
   const [selectedSlug, setSelectedSlug] = useState('');
-  const [parsed, setParsed] = useState(null);
   const [displayName, setDisplayName] = useState('');
-  const [bulletOverrides, setBulletOverrides] = useState({});
-  const [skillOverrides, setSkillOverrides] = useState({});
-  const [techStackOverrides, setTechStackOverrides] = useState({});
-  const [summaryOverride, setSummaryOverride] = useState(null);
+  const [parsed, setParsed] = useState(null);
+  const [configs, setConfigs] = useState([]);
+  const [activeConfigId, setActiveConfigId] = useState(null);
+  const [editMode, setEditMode] = useState(null); // null | 'new' | configId string
+  const [editInitial, setEditInitial] = useState(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [expanded, setExpanded] = useState(true);
   const [error, setError] = useState('');
 
   // Load resume list
@@ -58,6 +320,7 @@ export default function ResumeConfiguration() {
         return fetch('/api/active-resume').then(r => r.json()).then(active => {
           if (active.slug && data.find(r => r.slug === active.slug)) {
             setSelectedSlug(active.slug);
+            setActiveConfigId(active.config_id || null);
           } else if (data.length > 0) {
             setSelectedSlug(data[0].slug);
           }
@@ -66,156 +329,137 @@ export default function ResumeConfiguration() {
       .catch(() => setError('Failed to load resumes.'));
   }, [searchParams]);
 
-  // Load parsed + prefs when slug changes
+  // Load parsed + configs when slug changes
   useEffect(() => {
     if (!selectedSlug) return;
     setLoading(true);
     setError('');
-    setSaved(false);
-    setExpanded(true);
+    setEditMode(null);
+    setEditInitial(null);
     Promise.all([
       fetch(`/api/resumes/${selectedSlug}/parsed`).then(r => r.json()),
+      fetch(`/api/resumes/${selectedSlug}/configurations`).then(r => r.json()),
       fetch(`/api/resumes/${selectedSlug}/preferences`).then(r => r.json()),
+      fetch('/api/active-resume').then(r => r.json()),
     ])
-      .then(([parsedData, prefs]) => {
+      .then(([parsedData, configList, prefs, active]) => {
         if (parsedData.detail) {
           setError(parsedData.detail);
         } else {
           setParsed(parsedData);
+          setConfigs(configList);
           const defaultName = selectedSlug.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
           setDisplayName(prefs.display_name || defaultName);
-          setBulletOverrides(prefs.bullets || {});
-          setSkillOverrides(prefs.skill_categories || {});
-          setTechStackOverrides(prefs.tech_stacks || {});
-          setSummaryOverride(prefs.summary || null);
+          if (active.slug === selectedSlug) {
+            setActiveConfigId(active.config_id || null);
+          }
         }
       })
       .catch(() => setError('Failed to load resume data.'))
       .finally(() => setLoading(false));
   }, [selectedSlug]);
 
-  const toggleBullet = useCallback((id, currentEffective, defaultStatus = 'EDITABLE') => {
-    const next = currentEffective === 'LOCKED' ? 'EDITABLE' : 'LOCKED';
-    setBulletOverrides(prev => {
-      const updated = { ...prev };
-      if (next === defaultStatus) delete updated[id];
-      else updated[id] = next;
-      return updated;
-    });
-    setSaved(false);
-  }, []);
+  const handleNewConfig = () => {
+    setEditInitial(null);
+    setEditMode('new');
+  };
 
-  const toggleSkill = useCallback((cat, currentEffective, defaultStatus = 'EDITABLE') => {
-    const next = currentEffective === 'LOCKED' ? 'EDITABLE' : 'LOCKED';
-    setSkillOverrides(prev => {
-      const updated = { ...prev };
-      if (next === defaultStatus) delete updated[cat];
-      else updated[cat] = next;
-      return updated;
-    });
-    setSaved(false);
-  }, []);
-
-  const toggleTechStack = useCallback((company, currentEffective, defaultStatus = 'LOCKED') => {
-    const next = currentEffective === 'LOCKED' ? 'EDITABLE' : 'LOCKED';
-    setTechStackOverrides(prev => {
-      const updated = { ...prev };
-      if (next === defaultStatus) delete updated[company];
-      else updated[company] = next;
-      return updated;
-    });
-    setSaved(false);
-  }, []);
-
-  const toggleSummary = useCallback((currentEffective, defaultStatus = 'EDITABLE') => {
-    const next = currentEffective === 'LOCKED' ? 'EDITABLE' : 'LOCKED';
-    setSummaryOverride(next === defaultStatus ? null : next);
-    setSaved(false);
-  }, []);
-
-  const handleSave = async () => {
-    setSaving(true);
+  const handleEditConfig = async (configId) => {
     try {
-      const resp = await fetch(`/api/resumes/${selectedSlug}/preferences`, {
+      const resp = await fetch(`/api/resumes/${selectedSlug}/configurations/${configId}`);
+      const data = await resp.json();
+      setEditInitial(data);
+      setEditMode(configId);
+    } catch {
+      setError('Failed to load configuration.');
+    }
+  };
+
+  const handleDeleteConfig = async (configId) => {
+    if (!window.confirm('Delete this configuration? This cannot be undone.')) return;
+    try {
+      await fetch(`/api/resumes/${selectedSlug}/configurations/${configId}`, { method: 'DELETE' });
+      setConfigs(prev => prev.filter(c => c.id !== configId));
+      if (activeConfigId === configId) setActiveConfigId(null);
+    } catch {
+      setError('Failed to delete configuration.');
+    }
+  };
+
+  const handleSetActive = async (configId) => {
+    try {
+      await fetch('/api/active-resume', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          display_name: displayName,
-          bullets: bulletOverrides,
-          skill_categories: skillOverrides,
-          tech_stacks: techStackOverrides,
-          summary: summaryOverride,
-        }),
+        body: JSON.stringify({ slug: selectedSlug, config_id: configId }),
       });
-      if (!resp.ok) throw new Error('Save failed');
-      // Update the display name in the resume list
-      setResumes(prev => prev.map(r =>
-        r.slug === selectedSlug ? { ...r, display_name: displayName } : r
-      ));
-      setSaved(true);
-      setExpanded(false);
+      setActiveConfigId(configId);
     } catch {
-      setError('Failed to save preferences.');
+      setError('Failed to set active configuration.');
+    }
+  };
+
+  const handleSaveConfig = async (formData) => {
+    setSaving(true);
+    try {
+      if (editMode === 'new') {
+        const resp = await fetch(`/api/resumes/${selectedSlug}/configurations`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(formData),
+        });
+        const created = await resp.json();
+        setConfigs(prev => [...prev, created]);
+      } else {
+        const resp = await fetch(`/api/resumes/${selectedSlug}/configurations/${editMode}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(formData),
+        });
+        const updated = await resp.json();
+        setConfigs(prev => prev.map(c => c.id === editMode ? { ...c, name: updated.name, locked_count: updated.locked_count } : c));
+      }
+      setEditMode(null);
+      setEditInitial(null);
+    } catch {
+      setError('Failed to save configuration.');
     } finally {
       setSaving(false);
     }
   };
 
-  const resetAll = () => {
-    setBulletOverrides({});
-    setSkillOverrides({});
-    setSummaryOverride(null);
-    setSaved(false);
+  const handleSaveDisplayName = async () => {
+    try {
+      await fetch(`/api/resumes/${selectedSlug}/preferences`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ display_name: displayName }),
+      });
+      setResumes(prev => prev.map(r => r.slug === selectedSlug ? { ...r, display_name: displayName } : r));
+    } catch {
+      setError('Failed to save display name.');
+    }
   };
-
-  const sections = parsed?.sections || [];
-  const header = parsed?.header || {};
-
-  const summaryParts = sections.map(sec => {
-    if (sec.type === 'experience') {
-      const bullets = sec.entries.reduce((a, e) => a + e.bullets.length, 0);
-      return `${sec.entries.length} companies · ${bullets} bullets`;
-    }
-    if (sec.type === 'projects') {
-      const bullets = sec.projects.reduce((a, p) => a + p.bullets.length, 0);
-      return `${sec.projects.length} projects · ${bullets} bullets`;
-    }
-    if (sec.type === 'skills') return `${sec.skills.length} skill categories`;
-    if (sec.type === 'education') return `${sec.entries.length} education`;
-    return null;
-  }).filter(Boolean);
-
-  const overrideCount = Object.keys(bulletOverrides).length + Object.keys(skillOverrides).length
-    + Object.keys(techStackOverrides).length + (summaryOverride !== null ? 1 : 0);
-  const lockedCount = Object.values(bulletOverrides).filter(v => v === 'LOCKED').length
-    + Object.values(skillOverrides).filter(v => v === 'LOCKED').length
-    + Object.values(techStackOverrides).filter(v => v === 'LOCKED').length
-    + (summaryOverride === 'LOCKED' ? 1 : 0);
 
   return (
     <div>
       <div className="page-header">
         <h2>Resume Configuration</h2>
-        <p>Configure lock/edit preferences for each resume. Locked bullets are never changed by AI.</p>
+        <p>Manage named configurations for each resume. Each config defines which bullets are locked or editable.</p>
       </div>
 
       {error && <div className="message message-error">{error}</div>}
 
       {/* Resume selector */}
       <div className="card">
-        <div className="form-group" style={{ marginBottom: 0 }}>
+        <div className="form-group" style={{ marginBottom: selectedSlug ? 12 : 0 }}>
           <label>Select Resume</label>
           <select
             value={selectedSlug}
             onChange={(e) => setSelectedSlug(e.target.value)}
             style={{
-              width: '100%',
-              padding: '10px 14px',
-              border: '1px solid #d2d2d7',
-              borderRadius: 8,
-              fontSize: 14,
-              background: '#fafafa',
-              fontFamily: 'inherit',
+              width: '100%', padding: '10px 14px', border: '1px solid #d2d2d7',
+              borderRadius: 8, fontSize: 14, background: '#fafafa', fontFamily: 'inherit',
             }}
           >
             {resumes.length === 0 && <option value="">No resumes available</option>}
@@ -224,210 +468,65 @@ export default function ResumeConfiguration() {
             ))}
           </select>
         </div>
+
+        {selectedSlug && !loading && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
+            <input
+              type="text"
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              onBlur={handleSaveDisplayName}
+              placeholder="Display name"
+              style={{
+                flex: 1, padding: '8px 12px', border: '1px solid #d2d2d7',
+                borderRadius: 8, fontSize: 14, background: '#fafafa', fontFamily: 'inherit',
+              }}
+            />
+            <span style={{ fontSize: 12, color: '#86868b' }}>Display name (auto-saves on blur)</span>
+          </div>
+        )}
       </div>
 
-      {loading && (
-        <div className="empty-state"><p>Loading resume...</p></div>
-      )}
+      {loading && <div className="empty-state"><p>Loading resume...</p></div>}
 
-      {!loading && selectedSlug && parsed && (
+      {!loading && selectedSlug && parsed && editMode === null && (
         <>
-          {/* Summary card — always visible */}
           <div className="card">
-            <div className="resume-meta">
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
-                {expanded ? (
-                  <input
-                    type="text"
-                    value={displayName}
-                    onChange={(e) => { setDisplayName(e.target.value); setSaved(false); }}
-                    placeholder="Display name"
-                    style={{
-                      fontSize: 18,
-                      fontWeight: 700,
-                      border: '1px solid #d2d2d7',
-                      borderRadius: 8,
-                      padding: '6px 12px',
-                      flex: 1,
-                      background: '#fafafa',
-                    }}
-                  />
-                ) : (
-                  <div style={{ fontSize: 18, fontWeight: 700, padding: '6px 0' }}>{displayName}</div>
-                )}
-              </div>
-              <div className="resume-meta-details">
-                {[cleanLocked(header.name), cleanLocked(header.email), cleanLocked(header.phone)]
-                  .filter(Boolean).join(' · ')}
-              </div>
-              <div className="resume-meta-stats">
-                {summaryParts.map((part, i) => (
-                  <span key={i} className="meta-stat">{part}</span>
-                ))}
-                {lockedCount > 0 && (
-                  <span className="meta-stat meta-stat-locked">{lockedCount} user-locked</span>
-                )}
-              </div>
-            </div>
-
-            <div className="prefs-actions">
-              {expanded ? (
-                <>
-                  <button className="btn btn-secondary" onClick={resetAll}>Reset All</button>
-                  <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
-                    {saving ? 'Saving...' : 'Save Preferences'}
-                  </button>
-                </>
-              ) : (
-                <button className="btn btn-secondary" onClick={() => setExpanded(true)}>
-                  Edit Preferences
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Collapsible sections */}
-          {expanded && sections.map((sec, si) => {
-            if (sec.type === 'experience') {
-              return (
-                <div key={si} className="card">
-                  <h3 className="section-title">Work Experience</h3>
-                  {sec.entries.map((entry, ei) => (
-                    <div key={ei} className="exp-entry">
-                      <div className="exp-header">
-                        <span className="exp-company">{cleanLocked(entry.company)}</span>
-                        <span className="exp-title">{cleanLocked(entry.title)}</span>
-                        <span className="exp-dates">{cleanLocked(entry.dates)}</span>
-                      </div>
-                      <div className="bullets-list">
-                        {entry.bullets.map((b) => (
-                          <BulletRow
-                            key={b.id}
-                            bullet={b}
-                            override={bulletOverrides[b.id] ?? null}
-                            onToggle={() => toggleBullet(b.id, bulletOverrides[b.id] ?? b.status, b.status)}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              );
-            }
-
-            if (sec.type === 'projects') {
-              return (
-                <div key={si} className="card">
-                  <h3 className="section-title">Projects</h3>
-                  {sec.projects.map((proj, pi) => (
-                    <div key={pi} className="exp-entry">
-                      <div className="exp-header">
-                        <span className="exp-company">{cleanLocked(proj.name)}</span>
-                        {proj.dates && <span className="exp-dates">{cleanLocked(proj.dates)}</span>}
-                      </div>
-                      <div className="bullets-list">
-                        {proj.bullets.map((b) => (
-                          <BulletRow
-                            key={b.id}
-                            bullet={b}
-                            override={bulletOverrides[b.id] ?? null}
-                            onToggle={() => toggleBullet(b.id, bulletOverrides[b.id] ?? b.status, b.status)}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              );
-            }
-
-            if (sec.type === 'skills') {
-              return (
-                <div key={si} className="card">
-                  <h3 className="section-title">Skills</h3>
-                  <div className="bullets-list">
-                    {sec.skills.map((skill, ski) => {
-                      const cat = cleanLocked(skill.category);
-                      const effective = skillOverrides[cat] ?? skill.status;
-                      return (
-                        <div key={ski} className={`bullet-row ${effective === 'LOCKED' ? 'bullet-row-locked' : ''}`}>
-                          <StatusBadge
-                            status={effective}
-                            onToggle={() => toggleSkill(cat, effective, skill.status)}
-                          />
-                          <span className="bullet-text">
-                            {cat && <strong>{cat}: </strong>}
-                            {skill.items}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            }
-
-            if (sec.type === 'summary') {
-              const defaultSummaryStatus = sec.status ?? 'EDITABLE';
-              const effective = summaryOverride ?? defaultSummaryStatus;
-              return (
-                <div key={si} className="card">
-                  <h3 className="section-title">Summary</h3>
-                  <div className={`bullet-row ${effective === 'LOCKED' ? 'bullet-row-locked' : ''}`}>
-                    <StatusBadge
-                      status={effective}
-                      onToggle={() => toggleSummary(effective, defaultSummaryStatus)}
-                    />
-                    <span className="bullet-text">{sec.text}</span>
-                  </div>
-                </div>
-              );
-            }
-
-            return null;
-          })}
-
-          {/* Tech Stack section card */}
-          {expanded && (() => {
-            const expSec = sections.find(s => s.type === 'experience');
-            const techEntries = expSec
-              ? expSec.entries.filter(e => cleanLocked(e.tech_stack))
-              : [];
-            if (techEntries.length === 0) return null;
-            return (
-              <div className="card">
-                <h3 className="section-title">Tech Stack</h3>
-                <div className="bullets-list">
-                  {techEntries.map((entry, i) => {
-                    const company = cleanLocked(entry.company);
-                    const effective = techStackOverrides[company] ?? 'LOCKED';
-                    return (
-                      <div key={i} className={`bullet-row ${effective === 'LOCKED' ? 'bullet-row-locked' : ''}`}>
-                        <StatusBadge
-                          status={effective}
-                          onToggle={() => toggleTechStack(company, effective, 'LOCKED')}
-                        />
-                        <span className="bullet-text">
-                          <strong>{company}</strong>: {cleanLocked(entry.tech_stack)}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })()}
-
-          {/* Floating save bar */}
-          {expanded && !saved && overrideCount > 0 && (
-            <div className="save-bar">
-              <span>{overrideCount} preference{overrideCount !== 1 ? 's' : ''} changed</span>
-              <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
-                {saving ? 'Saving...' : 'Save Preferences'}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+              <h3 style={{ margin: 0 }}>Configurations</h3>
+              <button className="btn btn-primary" onClick={handleNewConfig}>
+                + New Configuration
               </button>
             </div>
-          )}
+
+            {configs.length === 0 ? (
+              <div className="empty-state" style={{ padding: '24px 0' }}>
+                <p>No configurations yet. Create one to define lock/edit preferences.</p>
+              </div>
+            ) : (
+              configs.map(config => (
+                <ConfigCard
+                  key={config.id}
+                  config={config}
+                  isActive={config.id === activeConfigId}
+                  onEdit={() => handleEditConfig(config.id)}
+                  onDelete={() => handleDeleteConfig(config.id)}
+                  onSetActive={() => handleSetActive(config.id)}
+                />
+              ))
+            )}
+          </div>
         </>
+      )}
+
+      {!loading && selectedSlug && parsed && editMode !== null && (
+        <ConfigEditor
+          parsed={parsed}
+          initial={editInitial}
+          onSave={handleSaveConfig}
+          onCancel={() => { setEditMode(null); setEditInitial(null); }}
+          saving={saving}
+        />
       )}
     </div>
   );

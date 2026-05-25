@@ -67,23 +67,106 @@ def _active_path() -> Path:
     return BASE_RESUME_DIR / "active.json"
 
 
-def _get_active_slug() -> str | None:
+def _get_active() -> dict:
     p = _active_path()
     if p.exists():
         try:
-            return json.loads(p.read_text(encoding="utf-8")).get("slug")
+            return json.loads(p.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, IOError):
             pass
-    return None
+    return {"slug": None, "config_id": None}
+
+
+def _get_active_slug() -> str | None:
+    return _get_active().get("slug")
+
+
+# --- Config helpers ---
+
+def _configs_dir(slug: str) -> Path:
+    d = _prefs_dir() / f"{slug}_configs"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _config_path(slug: str, config_id: str) -> Path:
+    return _configs_dir(slug) / f"{config_id}.json"
+
+
+def _name_to_config_id(name: str) -> str:
+    return re.sub(r'[^a-z0-9]+', '_', name.lower()).strip('_') or "config"
+
+
+def _unique_config_id(slug: str, base_id: str) -> str:
+    existing = {p.stem for p in _configs_dir(slug).glob("*.json")}
+    if base_id not in existing:
+        return base_id
+    i = 2
+    while f"{base_id}_{i}" in existing:
+        i += 1
+    return f"{base_id}_{i}"
+
+
+def _config_locked_count(config_data: dict) -> int:
+    return (
+        sum(1 for v in config_data.get("bullets", {}).values() if v == "LOCKED")
+        + sum(1 for v in config_data.get("skill_categories", {}).values() if v == "LOCKED")
+        + sum(1 for v in config_data.get("tech_stacks", {}).values() if v == "LOCKED")
+        + (1 if config_data.get("summary") == "LOCKED" else 0)
+    )
+
+
+def _list_configs(slug: str) -> list:
+    configs = []
+    for p in sorted(_configs_dir(slug).glob("*.json")):
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+            configs.append({
+                "id": p.stem,
+                "name": data.get("name", p.stem),
+                "locked_count": _config_locked_count(data),
+            })
+        except (json.JSONDecodeError, IOError):
+            pass
+    return configs
 
 
 def _migrate_old_prefs_if_needed():
-    """If old preferences.json exists and new one doesn't, migrate it."""
+    """Migrate old preferences.json → prefs/{slug}.json, then bullet data → config files."""
     old_prefs = BASE_RESUME_DIR / "preferences.json"
     new_prefs = _prefs_path("resume")
     if old_prefs.exists() and not new_prefs.is_file():
         new_prefs.write_text(old_prefs.read_text(encoding="utf-8"), encoding="utf-8")
         old_prefs.unlink()
+
+    # For each slug prefs file: if it has bullet data and no config dir yet, migrate to a config
+    for prefs_file in _prefs_dir().glob("*.json"):
+        slug = prefs_file.stem
+        try:
+            prefs = json.loads(prefs_file.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, IOError):
+            continue
+        has_config_data = (
+            prefs.get("bullets") or prefs.get("skill_categories")
+            or prefs.get("tech_stacks") or prefs.get("summary") is not None
+        )
+        if not has_config_data:
+            continue
+        if list(_configs_dir(slug).glob("*.json")):
+            continue
+        # Create "default" config from old prefs
+        display = prefs.get("display_name") or slug.replace("_", " ").title()
+        config_data = {
+            "name": display,
+            "bullets": prefs.get("bullets", {}),
+            "skill_categories": prefs.get("skill_categories", {}),
+            "tech_stacks": prefs.get("tech_stacks", {}),
+            "summary": prefs.get("summary"),
+        }
+        _config_path(slug, "default").write_text(json.dumps(config_data, indent=2), encoding="utf-8")
+        # Strip bullet data from the prefs file (keep only display_name)
+        clean = {"display_name": display}
+        prefs_file.write_text(json.dumps(clean, indent=2), encoding="utf-8")
 
 
 def _get_resume_item(slug: str) -> dict:
@@ -118,12 +201,14 @@ def _get_resume_item(slug: str) -> dict:
             display_name = prefs.get("display_name", display_name)
         except (json.JSONDecodeError, IOError):
             pass
+    config_count = len(list(_configs_dir(slug).glob("*.json")))
     return {
         "slug": slug,
         "display_name": display_name,
         "filename": f"{slug}.tex",
         "bullet_count": bullet_count,
         "summary": summary,
+        "config_count": config_count,
     }
 
 
@@ -165,7 +250,7 @@ async def upload_resume_multi(file: UploadFile = File(...)):
 
 @app.delete("/api/resumes/{slug}")
 async def delete_resume(slug: str):
-    """Delete a resume .tex and its preferences file."""
+    """Delete a resume .tex, its preferences file, and all its configurations."""
     tex_path = BASE_RESUME_DIR / f"{slug}.tex"
     if not tex_path.exists():
         raise HTTPException(404, "Resume not found.")
@@ -173,10 +258,14 @@ async def delete_resume(slug: str):
     prefs = _prefs_path(slug)
     if prefs.exists():
         prefs.unlink()
+    configs_d = _prefs_dir() / f"{slug}_configs"
+    if configs_d.exists():
+        import shutil
+        shutil.rmtree(configs_d)
     # If this was the active resume, clear it
     active = _get_active_slug()
     if active == slug:
-        _active_path().write_text(json.dumps({"slug": None}), encoding="utf-8")
+        _active_path().write_text(json.dumps({"slug": None, "config_id": None}), encoding="utf-8")
     return {"status": "deleted", "slug": slug}
 
 
@@ -205,35 +294,119 @@ async def get_resume_preferences(slug: str):
 
 @app.post("/api/resumes/{slug}/preferences")
 async def save_resume_preferences(slug: str, request: Request):
-    """Save preferences JSON for a given slug."""
+    """Save display_name for a given slug (bullet prefs are now in configurations)."""
     tex_path = BASE_RESUME_DIR / f"{slug}.tex"
     if not tex_path.exists():
         raise HTTPException(404, f"Resume '{slug}' not found.")
     data = await request.json()
-    _prefs_path(slug).write_text(json.dumps(data, indent=2), encoding="utf-8")
+    # Only persist display_name at the resume level
+    existing = {}
+    pp = _prefs_path(slug)
+    if pp.exists():
+        try:
+            existing = json.loads(pp.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, IOError):
+            pass
+    if "display_name" in data:
+        existing["display_name"] = data["display_name"]
+    pp.write_text(json.dumps(existing, indent=2), encoding="utf-8")
     return {"status": "saved"}
+
+
+# --- Configurations (named preference sets per resume) ---
+
+@app.get("/api/resumes/{slug}/configurations")
+async def list_resume_configs(slug: str):
+    """List all named configurations for a given resume slug."""
+    if not (BASE_RESUME_DIR / f"{slug}.tex").exists():
+        raise HTTPException(404, f"Resume '{slug}' not found.")
+    return _list_configs(slug)
+
+
+@app.post("/api/resumes/{slug}/configurations")
+async def create_resume_config(slug: str, request: Request):
+    """Create a new named configuration for a resume."""
+    if not (BASE_RESUME_DIR / f"{slug}.tex").exists():
+        raise HTTPException(404, f"Resume '{slug}' not found.")
+    data = await request.json()
+    name = (data.get("name") or "New Configuration").strip()
+    config_id = _unique_config_id(slug, _name_to_config_id(name))
+    config_data = {
+        "name": name,
+        "bullets": data.get("bullets", {}),
+        "skill_categories": data.get("skill_categories", {}),
+        "tech_stacks": data.get("tech_stacks", {}),
+        "summary": data.get("summary"),
+    }
+    _config_path(slug, config_id).write_text(json.dumps(config_data, indent=2), encoding="utf-8")
+    return {"id": config_id, "name": name, "locked_count": _config_locked_count(config_data)}
+
+
+@app.get("/api/resumes/{slug}/configurations/{config_id}")
+async def get_resume_config(slug: str, config_id: str):
+    """Get a specific configuration by ID."""
+    config_file = _config_path(slug, config_id)
+    if not config_file.exists():
+        raise HTTPException(404, f"Configuration '{config_id}' not found.")
+    return json.loads(config_file.read_text(encoding="utf-8"))
+
+
+@app.put("/api/resumes/{slug}/configurations/{config_id}")
+async def update_resume_config(slug: str, config_id: str, request: Request):
+    """Update a specific configuration."""
+    config_file = _config_path(slug, config_id)
+    if not config_file.exists():
+        raise HTTPException(404, f"Configuration '{config_id}' not found.")
+    data = await request.json()
+    existing = json.loads(config_file.read_text(encoding="utf-8"))
+    existing.update({
+        "name": data.get("name", existing.get("name")),
+        "bullets": data.get("bullets", existing.get("bullets", {})),
+        "skill_categories": data.get("skill_categories", existing.get("skill_categories", {})),
+        "tech_stacks": data.get("tech_stacks", existing.get("tech_stacks", {})),
+        "summary": data.get("summary", existing.get("summary")),
+    })
+    config_file.write_text(json.dumps(existing, indent=2), encoding="utf-8")
+    return {"status": "saved", "id": config_id, "name": existing["name"],
+            "locked_count": _config_locked_count(existing)}
+
+
+@app.delete("/api/resumes/{slug}/configurations/{config_id}")
+async def delete_resume_config(slug: str, config_id: str):
+    """Delete a specific configuration."""
+    config_file = _config_path(slug, config_id)
+    if not config_file.exists():
+        raise HTTPException(404, f"Configuration '{config_id}' not found.")
+    config_file.unlink()
+    # If this was the active config, clear it
+    active = _get_active()
+    if active.get("slug") == slug and active.get("config_id") == config_id:
+        _active_path().write_text(
+            json.dumps({"slug": slug, "config_id": None}, indent=2), encoding="utf-8"
+        )
+    return {"status": "deleted", "id": config_id}
 
 
 # --- Active resume ---
 
 @app.get("/api/active-resume")
 async def get_active_resume():
-    """Return the currently active resume slug."""
-    slug = _get_active_slug()
-    return {"slug": slug}
+    """Return the currently active resume slug and config_id."""
+    return _get_active()
 
 
 @app.post("/api/active-resume")
 async def set_active_resume(request: Request):
-    """Set the active resume by slug."""
+    """Set the active resume (slug + optional config_id)."""
     data = await request.json()
     slug = data.get("slug")
+    config_id = data.get("config_id")
     if slug:
         tex_path = BASE_RESUME_DIR / f"{slug}.tex"
         if not tex_path.exists():
             raise HTTPException(404, f"Resume '{slug}' not found.")
-    _active_path().write_text(json.dumps({"slug": slug}, indent=2), encoding="utf-8")
-    return {"status": "saved", "slug": slug}
+    _active_path().write_text(json.dumps({"slug": slug, "config_id": config_id}, indent=2), encoding="utf-8")
+    return {"status": "saved", "slug": slug, "config_id": config_id}
 
 
 # --- Legacy Resume Upload ---
@@ -363,16 +536,14 @@ async def generate(request: Request):
     if not jd_text and not jd_url:
         raise HTTPException(400, "Job description text or URL is required.")
 
-    # Resolve active resume
-    active_slug = _get_active_slug()
-    if active_slug:
-        base_path = BASE_RESUME_DIR / f"{active_slug}.tex"
-        active_prefs_path = _prefs_path(active_slug)
-    else:
-        # Backward compat: fall back to resume.tex
+    # Resolve active resume + config
+    active_data = _get_active()
+    active_slug = active_data.get("slug") or "resume"
+    active_config_id = active_data.get("config_id")
+    base_path = BASE_RESUME_DIR / f"{active_slug}.tex"
+    if not base_path.exists():
         base_path = BASE_RESUME_DIR / "resume.tex"
         active_slug = "resume"
-        active_prefs_path = BASE_RESUME_DIR / "preferences.json"
 
     if not base_path.exists():
         raise HTTPException(400, "No base resume found. Please upload a .tex file first.")
@@ -409,13 +580,15 @@ async def generate(request: Request):
 
             parsed_original = parse_resume(base_tex)
 
-            # Apply user preferences (lock/edit overrides)
+            # Apply user preferences from selected config (lock/edit overrides)
             preferences = {}
-            if active_prefs_path.exists():
-                try:
-                    preferences = json.loads(active_prefs_path.read_text(encoding="utf-8"))
-                except (json.JSONDecodeError, IOError):
-                    pass
+            if active_config_id:
+                config_file = _config_path(active_slug, active_config_id)
+                if config_file.exists():
+                    try:
+                        preferences = json.loads(config_file.read_text(encoding="utf-8"))
+                    except (json.JSONDecodeError, IOError):
+                        pass
             _apply_preferences(parsed_original, preferences)
 
             editable_bullets = get_editable_bullets(parsed_original)
