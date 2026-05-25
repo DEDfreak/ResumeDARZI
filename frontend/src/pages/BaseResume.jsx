@@ -58,20 +58,37 @@ export default function BaseResume() {
       .finally(() => setLoading(false));
   }, []);
 
-  const toggleBullet = useCallback((id, currentEffective) => {
+  const toggleBullet = useCallback((id, currentEffective, defaultStatus = 'EDITABLE') => {
     const next = currentEffective === 'LOCKED' ? 'EDITABLE' : 'LOCKED';
-    setBulletOverrides(prev => ({ ...prev, [id]: next }));
+    setBulletOverrides(prev => {
+      const updated = { ...prev };
+      if (next === defaultStatus) {
+        delete updated[id];
+      } else {
+        updated[id] = next;
+      }
+      return updated;
+    });
     setSaved(false);
   }, []);
 
-  const toggleSkill = useCallback((cat, currentEffective) => {
+  const toggleSkill = useCallback((cat, currentEffective, defaultStatus = 'EDITABLE') => {
     const next = currentEffective === 'LOCKED' ? 'EDITABLE' : 'LOCKED';
-    setSkillOverrides(prev => ({ ...prev, [cat]: next }));
+    setSkillOverrides(prev => {
+      const updated = { ...prev };
+      if (next === defaultStatus) {
+        delete updated[cat];
+      } else {
+        updated[cat] = next;
+      }
+      return updated;
+    });
     setSaved(false);
   }, []);
 
-  const toggleSummary = useCallback((currentEffective) => {
-    setSummaryOverride(currentEffective === 'LOCKED' ? 'EDITABLE' : 'LOCKED');
+  const toggleSummary = useCallback((currentEffective, defaultStatus = 'EDITABLE') => {
+    const next = currentEffective === 'LOCKED' ? 'EDITABLE' : 'LOCKED';
+    setSummaryOverride(next === defaultStatus ? null : next);
     setSaved(false);
   }, []);
 
@@ -137,6 +154,8 @@ export default function BaseResume() {
     return acc;
   }, 0);
 
+  const overrideCount = Object.keys(bulletOverrides).length + Object.keys(skillOverrides).length
+    + (summaryOverride !== null ? 1 : 0);
   const lockedCount = Object.values(bulletOverrides).filter(v => v === 'LOCKED').length
     + Object.values(skillOverrides).filter(v => v === 'LOCKED').length
     + (summaryOverride === 'LOCKED' ? 1 : 0);
@@ -198,7 +217,7 @@ export default function BaseResume() {
                         key={b.id}
                         bullet={b}
                         override={bulletOverrides[b.id] ?? null}
-                        onToggle={() => toggleBullet(b.id, bulletOverrides[b.id] ?? b.status)}
+                        onToggle={() => toggleBullet(b.id, bulletOverrides[b.id] ?? b.status, b.status)}
                       />
                     ))}
                   </div>
@@ -232,7 +251,7 @@ export default function BaseResume() {
                         key={b.id}
                         bullet={b}
                         override={bulletOverrides[b.id] ?? null}
-                        onToggle={() => toggleBullet(b.id, bulletOverrides[b.id] ?? b.status)}
+                        onToggle={() => toggleBullet(b.id, bulletOverrides[b.id] ?? b.status, b.status)}
                       />
                     ))}
                   </div>
@@ -254,7 +273,7 @@ export default function BaseResume() {
                     <div key={ski} className={`bullet-row ${effective === 'LOCKED' ? 'bullet-row-locked' : ''}`}>
                       <StatusBadge
                         status={effective}
-                        onToggle={() => toggleSkill(cat, effective)}
+                        onToggle={() => toggleSkill(cat, effective, skill.status)}
                       />
                       <span className="bullet-text">
                         {cat && <strong>{cat}: </strong>}
@@ -269,14 +288,15 @@ export default function BaseResume() {
         }
 
         if (sec.type === 'summary') {
-          const effective = summaryOverride ?? sec.status ?? 'EDITABLE';
+          const defaultSummaryStatus = sec.status ?? 'EDITABLE';
+          const effective = summaryOverride ?? defaultSummaryStatus;
           return (
             <div key={si} className="card">
               <h3 className="section-title">Summary</h3>
               <div className={`bullet-row ${effective === 'LOCKED' ? 'bullet-row-locked' : ''}`}>
                 <StatusBadge
                   status={effective}
-                  onToggle={() => toggleSummary(effective)}
+                  onToggle={() => toggleSummary(effective, defaultSummaryStatus)}
                 />
                 <span className="bullet-text">{sec.text}</span>
               </div>
@@ -287,10 +307,10 @@ export default function BaseResume() {
         return null;
       })}
 
-      {/* Floating save bar */}
-      {!saved && (
+      {/* Floating save bar — only shown when there are unsaved changes */}
+      {!saved && overrideCount > 0 && (
         <div className="save-bar">
-          <span>{Object.keys(bulletOverrides).length + Object.keys(skillOverrides).length} preference{(Object.keys(bulletOverrides).length + Object.keys(skillOverrides).length) !== 1 ? 's' : ''} changed</span>
+          <span>{overrideCount} preference{overrideCount !== 1 ? 's' : ''} changed</span>
           <button
             className="btn btn-primary"
             onClick={handleSave}
