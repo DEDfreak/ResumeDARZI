@@ -226,8 +226,8 @@ async def list_resumes():
 
 
 @app.post("/api/resumes/upload")
-async def upload_resume_multi(file: UploadFile = File(...)):
-    """Upload a new .tex file, stored by slug."""
+async def upload_resume_multi(file: UploadFile = File(...), name: str = Form(default="")):
+    """Upload a new .tex file, stored by slug. Optional name sets the display name."""
     if not file.filename.endswith(".tex"):
         raise HTTPException(400, "Only .tex files are accepted.")
 
@@ -244,6 +244,19 @@ async def upload_resume_multi(file: UploadFile = File(...)):
     except Exception as e:
         save_path.unlink(missing_ok=True)
         raise HTTPException(400, f"Error parsing LaTeX: {e}")
+
+    # Save display name if provided
+    display_name = name.strip()
+    if display_name:
+        pp = _prefs_path(slug)
+        existing = {}
+        if pp.exists():
+            try:
+                existing = json.loads(pp.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, IOError):
+                pass
+        existing["display_name"] = display_name
+        pp.write_text(json.dumps(existing, indent=2), encoding="utf-8")
 
     return _get_resume_item(slug)
 

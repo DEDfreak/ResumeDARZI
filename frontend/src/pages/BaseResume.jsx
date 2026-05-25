@@ -11,7 +11,9 @@ export default function BaseResume() {
   const [success, setSuccess] = useState('');
   const [dragOver, setDragOver] = useState(false);
   const [uploadTab, setUploadTab] = useState('file');
+  const [uploadName, setUploadName] = useState('');
   const [pasteCode, setPasteCode] = useState('');
+  const [selectedFile, setSelectedFile] = useState(null);
   const fileInputRef = useRef(null);
 
   const fetchAll = async () => {
@@ -29,29 +31,72 @@ export default function BaseResume() {
     }
   };
 
-  useEffect(() => {
-    fetchAll();
-  }, []);
+  useEffect(() => { fetchAll(); }, []);
 
-  const handleUpload = async (file) => {
+  const uploadFormData = async (file, name) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (name.trim()) formData.append('name', name.trim());
+    const resp = await fetch('/api/resumes/upload', { method: 'POST', body: formData });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || 'Upload failed');
+    return data;
+  };
+
+  const handleFileSelect = (file) => {
     if (!file || !file.name.endsWith('.tex')) {
       setError('Please upload a .tex file.');
       return;
     }
+    setSelectedFile(file);
+    // Auto-fill name from filename if not already set
+    if (!uploadName.trim()) {
+      setUploadName(file.name.replace(/\.tex$/, '').replace(/[_-]/g, ' ').replace(/\b\w/g, c => c.toUpperCase()));
+    }
+    setError('');
+  };
+
+  const handleFileUpload = async () => {
+    if (!selectedFile) { setError('Please select a file first.'); return; }
     setUploading(true);
     setError('');
     setSuccess('');
-    const formData = new FormData();
-    formData.append('file', file);
     try {
-      const resp = await fetch('/api/resumes/upload', { method: 'POST', body: formData });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data.detail || 'Upload failed');
+      const data = await uploadFormData(selectedFile, uploadName);
       setResumes(prev => {
         const exists = prev.find(r => r.slug === data.slug);
         return exists ? prev.map(r => r.slug === data.slug ? data : r) : [...prev, data];
       });
       setSuccess(`Uploaded "${data.display_name}" successfully.`);
+      setSelectedFile(null);
+      setUploadName('');
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setDragOver(false);
+    const file = e.dataTransfer.files[0];
+    if (file) handleFileSelect(file);
+  };
+
+  const handlePasteSave = async () => {
+    if (!pasteCode.trim()) { setError('Please paste some LaTeX code first.'); return; }
+    setUploading(true);
+    setError('');
+    setSuccess('');
+    const blob = new Blob([pasteCode], { type: 'text/plain' });
+    const file = new File([blob], 'resume.tex', { type: 'text/plain' });
+    try {
+      const data = await uploadFormData(file, uploadName);
+      await fetchAll();
+      setSuccess(`Saved "${data.display_name}" successfully.`);
+      setPasteCode('');
+      setUploadName('');
     } catch (e) {
       setError(e.message);
     } finally {
@@ -93,44 +138,11 @@ export default function BaseResume() {
     }
   };
 
-  const handleDrop = (e) => {
-    e.preventDefault();
-    setDragOver(false);
-    const file = e.dataTransfer.files[0];
-    if (file) handleUpload(file);
-  };
-
-  const handlePasteSave = async () => {
-    if (!pasteCode.trim()) {
-      setError('Please paste some LaTeX code first.');
-      return;
-    }
-    setUploading(true);
-    setError('');
-    setSuccess('');
-    const blob = new Blob([pasteCode], { type: 'text/plain' });
-    const file = new File([blob], 'resume.tex', { type: 'text/plain' });
-    const formData = new FormData();
-    formData.append('file', file);
-    try {
-      const resp = await fetch('/api/resumes/upload', { method: 'POST', body: formData });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data.detail || 'Upload failed');
-      await fetchAll();
-      setSuccess(`Saved "${data.display_name}" successfully.`);
-      setPasteCode('');
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setUploading(false);
-    }
-  };
-
   return (
     <div>
       <div className="page-header">
         <h2>Base Resumes</h2>
-        <p>Upload and manage your LaTeX resume files. Set one as active for tailoring.</p>
+        <p>Upload and manage your LaTeX resume files.</p>
       </div>
 
       {error && <div className="message message-error">{error}</div>}
@@ -138,11 +150,23 @@ export default function BaseResume() {
 
       {/* Upload area */}
       <div className="card">
-        <h3>Upload Resume</h3>
+        <h3>Add Resume</h3>
+
+        {/* Name field — shared by both tabs */}
+        <div className="form-group">
+          <label>Resume Name</label>
+          <input
+            type="text"
+            value={uploadName}
+            onChange={(e) => setUploadName(e.target.value)}
+            placeholder="e.g. Software Engineer Resume, ML Focus Resume"
+          />
+        </div>
+
         <div className="tab-bar">
           <button
             className={`tab-btn${uploadTab === 'file' ? ' active' : ''}`}
-            onClick={() => setUploadTab('file')}
+            onClick={() => { setUploadTab('file'); setSelectedFile(null); }}
           >
             Upload File
           </button>
@@ -163,8 +187,8 @@ export default function BaseResume() {
               onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
               onDragLeave={() => setDragOver(false)}
             >
-              {uploading ? (
-                <p>Uploading...</p>
+              {selectedFile ? (
+                <p style={{ color: '#0071e3', fontWeight: 500 }}>{selectedFile.name} selected</p>
               ) : (
                 <>
                   <p>Drag & drop your .tex file here</p>
@@ -177,15 +201,15 @@ export default function BaseResume() {
               type="file"
               accept=".tex"
               style={{ display: 'none' }}
-              onChange={(e) => e.target.files[0] && handleUpload(e.target.files[0])}
+              onChange={(e) => e.target.files[0] && handleFileSelect(e.target.files[0])}
             />
             <div style={{ marginTop: 12, textAlign: 'right' }}>
               <button
                 className="btn btn-primary"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={uploading}
+                onClick={handleFileUpload}
+                disabled={uploading || !selectedFile}
               >
-                {uploading ? 'Uploading...' : 'Choose File'}
+                {uploading ? 'Uploading...' : 'Upload Resume'}
               </button>
             </div>
           </>
@@ -197,24 +221,13 @@ export default function BaseResume() {
               placeholder="Paste your LaTeX resume code here..."
               rows={12}
               style={{
-                width: '100%',
-                fontFamily: 'monospace',
-                fontSize: 12,
-                padding: '10px',
-                border: '1px solid #d2d2d7',
-                borderRadius: 8,
-                resize: 'vertical',
-                background: '#fafafa',
-                boxSizing: 'border-box',
-                marginTop: 8,
+                width: '100%', fontFamily: 'monospace', fontSize: 12,
+                padding: '10px', border: '1px solid #d2d2d7', borderRadius: 8,
+                resize: 'vertical', background: '#fafafa', boxSizing: 'border-box', marginTop: 8,
               }}
             />
             <div style={{ marginTop: 12, textAlign: 'right' }}>
-              <button
-                className="btn btn-primary"
-                onClick={handlePasteSave}
-                disabled={uploading}
-              >
+              <button className="btn btn-primary" onClick={handlePasteSave} disabled={uploading}>
                 {uploading ? 'Saving...' : 'Save Resume'}
               </button>
             </div>
@@ -232,13 +245,13 @@ export default function BaseResume() {
             <p>No resumes uploaded yet.</p>
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {resumes.map((r) => {
               const isActive = r.slug === activeSlug;
               const summaryText = r.summary
                 ? [
-                    r.summary.experience && `${r.summary.experience.entries} exp (${r.summary.experience.bullets} bullets)`,
-                    r.summary.projects && `${r.summary.projects.count} projects (${r.summary.projects.bullets} bullets)`,
+                    r.summary.experience && `${r.summary.experience.entries} companies · ${r.summary.experience.bullets} bullets`,
+                    r.summary.projects && `${r.summary.projects.count} projects`,
                     r.summary.skills && `${r.summary.skills.categories} skill categories`,
                   ].filter(Boolean).join(' · ')
                 : `${r.bullet_count} bullets`;
@@ -246,11 +259,8 @@ export default function BaseResume() {
                 <div
                   key={r.slug}
                   style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 12,
-                    padding: '14px 16px',
-                    borderRadius: 10,
+                    display: 'flex', alignItems: 'center', gap: 12,
+                    padding: '14px 16px', borderRadius: 10,
                     border: isActive ? '1.5px solid #0071e3' : '1px solid #e5e5ea',
                     background: isActive ? 'rgba(0,113,227,0.03)' : '#fafafa',
                     transition: 'all 0.15s',
@@ -262,6 +272,11 @@ export default function BaseResume() {
                       {isActive && (
                         <span className="meta-stat" style={{ background: 'rgba(0,113,227,0.1)', color: '#0071e3', fontSize: 11 }}>
                           Active
+                        </span>
+                      )}
+                      {r.config_count > 0 && (
+                        <span className="meta-stat" style={{ fontSize: 11 }}>
+                          {r.config_count} config{r.config_count !== 1 ? 's' : ''}
                         </span>
                       )}
                     </div>
@@ -276,7 +291,7 @@ export default function BaseResume() {
                         style={{ fontSize: 12, padding: '6px 14px' }}
                         onClick={() => handleSetActive(r.slug)}
                       >
-                        Set as Active
+                        Set Active
                       </button>
                     )}
                     <button
