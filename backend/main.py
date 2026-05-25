@@ -252,13 +252,19 @@ async def upload_resume(file: UploadFile = File(...)):
 
 @app.get("/api/base-resume")
 async def get_base_resume():
-    """Check if a base resume exists."""
-    path = BASE_RESUME_DIR / "resume.tex"
+    """Check if the active base resume exists (or falls back to resume.tex)."""
+    slug = _get_active_slug() or "resume"
+    path = BASE_RESUME_DIR / f"{slug}.tex"
+    if not path.exists():
+        # Try legacy fallback
+        path = BASE_RESUME_DIR / "resume.tex"
+        slug = "resume"
     if path.exists():
         parsed = parse_resume(path.read_text(encoding="utf-8"))
         return {
             "exists": True,
-            "filename": "resume.tex",
+            "slug": slug,
+            "filename": f"{slug}.tex",
             "sections": len(parsed.get("sections", [])),
             "editable_bullets": len(get_editable_bullets(parsed)),
             "header": parsed.get("header", {}),
@@ -341,10 +347,19 @@ async def generate(request: Request):
     if not jd_text and not jd_url:
         raise HTTPException(400, "Job description text or URL is required.")
 
-    # Check base resume exists
-    base_path = BASE_RESUME_DIR / "resume.tex"
+    # Resolve active resume
+    active_slug = _get_active_slug()
+    if active_slug:
+        base_path = BASE_RESUME_DIR / f"{active_slug}.tex"
+        active_prefs_path = _prefs_path(active_slug)
+    else:
+        # Backward compat: fall back to resume.tex
+        base_path = BASE_RESUME_DIR / "resume.tex"
+        active_slug = "resume"
+        active_prefs_path = BASE_RESUME_DIR / "preferences.json"
+
     if not base_path.exists():
-        raise HTTPException(400, "No base resume uploaded. Please upload your .tex file first.")
+        raise HTTPException(400, "No base resume found. Please upload a .tex file first.")
 
     async def event_stream() -> AsyncGenerator:
         try:
@@ -380,9 +395,9 @@ async def generate(request: Request):
 
             # Apply user preferences (lock/edit overrides)
             preferences = {}
-            if PREFS_FILE.exists():
+            if active_prefs_path.exists():
                 try:
-                    preferences = json.loads(PREFS_FILE.read_text(encoding="utf-8"))
+                    preferences = json.loads(active_prefs_path.read_text(encoding="utf-8"))
                 except (json.JSONDecodeError, IOError):
                     pass
             _apply_preferences(parsed_original, preferences)
