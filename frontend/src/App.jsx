@@ -3,6 +3,7 @@ import Home from './pages/Home';
 import Result from './pages/Result';
 import Settings from './pages/Settings';
 import BaseResume from './pages/BaseResume';
+import ResumeConfiguration from './pages/ResumeConfiguration';
 import './App.css';
 
 function App() {
@@ -26,6 +27,11 @@ function App() {
               </NavLink>
             </li>
             <li>
+              <NavLink to="/resume-configuration" className={({ isActive }) => isActive ? 'active' : ''}>
+                Resume Config
+              </NavLink>
+            </li>
+            <li>
               <NavLink to="/result" className={({ isActive }) => isActive ? 'active' : ''}>
                 Result
               </NavLink>
@@ -44,6 +50,7 @@ function App() {
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/base-resume" element={<BaseResume />} />
+            <Route path="/resume-configuration" element={<ResumeConfiguration />} />
             <Route path="/result" element={<Result />} />
             <Route path="/settings" element={<Settings />} />
           </Routes>
