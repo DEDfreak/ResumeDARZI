@@ -116,22 +116,24 @@ def extract_header_info(lines: list[str]) -> dict:
            stripped.startswith('\\newcommand') or stripped.startswith('\\def') or \
            stripped.startswith('\\input') or stripped.startswith('\\renewcommand') or \
            stripped.startswith('\\geometry') or stripped.startswith('\\RequirePackage') or \
-           stripped.startswith('\\titleformat'):
+           stripped.startswith('\\titleformat') or stripped.startswith('\\hypersetup'):
             continue
-        # Check for name commands
+        # Check for name commands — \textbf{\huge Name}, \name{...}, etc.
         name_match = re.search(r'\\(?:name|Name|LARGE|huge|Huge|textbf)\{([^}]+)\}', stripped)
         if name_match and not name:
             candidate = name_match.group(1).strip()
-            # Skip LaTeX placeholders like #1, #2
             if '#' in candidate:
                 continue
-            # Strip nested LaTeX commands (e.g. \huge, \textbf, etc.)
-            candidate = re.sub(r'\\[a-zA-Z]+\s+', '', candidate).strip()
-            name = candidate
-            break
-        # Check for centered large text that looks like a name
+            # Strip nested LaTeX commands (e.g. \huge → '')
+            candidate = re.sub(r'\\[a-zA-Z]+\s*', '', candidate).strip()
+            # A person's name has only letters, spaces, hyphens, dots, apostrophes
+            if candidate and re.match(r'^[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s\-\.\']{0,40}$', candidate):
+                name = candidate
+                break
+        # Fallback: plain text that looks like a name (no LaTeX, no special chars)
         clean = re.sub(r'\\[a-zA-Z]+\{?', '', stripped).replace('}', '').replace('{', '').strip()
-        if clean and '#' not in clean and not re.match(r'^\\', clean) and len(clean.split()) <= 5 and not EMAIL_RE.search(clean) and not name:
+        if clean and re.match(r'^[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s\-\.\']{1,40}$', clean) \
+                and not EMAIL_RE.search(clean) and not name:
             name = clean
             break
 
