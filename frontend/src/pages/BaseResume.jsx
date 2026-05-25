@@ -1,325 +1,212 @@
-import { useState, useEffect, useCallback } from 'react';
-
-function cleanLocked(str) {
-  return typeof str === 'string' ? str.replace(/^LOCKED:\s*/, '') : str;
-}
-
-function StatusBadge({ status, onToggle }) {
-  const isLocked = status === 'LOCKED';
-  return (
-    <button
-      className={`lock-badge ${isLocked ? 'lock-badge-locked' : 'lock-badge-edit'}`}
-      onClick={onToggle}
-      title={isLocked ? 'Click to make editable' : 'Click to lock'}
-    >
-      {isLocked ? '🔒 Locked' : '✏️ Editable'}
-    </button>
-  );
-}
-
-function BulletRow({ bullet, override, onToggle }) {
-  const effective = override ?? bullet.status;
-  return (
-    <div className={`bullet-row ${effective === 'LOCKED' ? 'bullet-row-locked' : ''}`}>
-      <StatusBadge status={effective} onToggle={onToggle} />
-      <span className="bullet-text">{cleanLocked(bullet.text)}</span>
-    </div>
-  );
-}
+import { useState, useEffect, useRef } from 'react';
 
 export default function BaseResume() {
-  const [parsed, setParsed] = useState(null);
+  const [resumes, setResumes] = useState([]);
+  const [activeSlug, setActiveSlug] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [dragOver, setDragOver] = useState(false);
+  const fileInputRef = useRef(null);
 
-  // Override maps — only user deviations from default
-  const [bulletOverrides, setBulletOverrides] = useState({});
-  const [skillOverrides, setSkillOverrides] = useState({});
-  const [summaryOverride, setSummaryOverride] = useState(null);
+  const fetchAll = async () => {
+    try {
+      const [resumesResp, activeResp] = await Promise.all([
+        fetch('/api/resumes').then(r => r.json()),
+        fetch('/api/active-resume').then(r => r.json()),
+      ]);
+      setResumes(resumesResp);
+      setActiveSlug(activeResp.slug);
+    } catch {
+      setError('Failed to load resumes.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    Promise.all([
-      fetch('/api/base-resume/parsed').then(r => r.json()),
-      fetch('/api/base-resume/preferences').then(r => r.json()),
-    ])
-      .then(([parsedData, prefs]) => {
-        if (parsedData.detail) {
-          setError(parsedData.detail);
-        } else {
-          setParsed(parsedData);
-          setBulletOverrides(prefs.bullets || {});
-          setSkillOverrides(prefs.skill_categories || {});
-          setSummaryOverride(prefs.summary || null);
-        }
-      })
-      .catch(() => setError('Failed to load resume data.'))
-      .finally(() => setLoading(false));
+    fetchAll();
   }, []);
 
-  const toggleBullet = useCallback((id, currentEffective, defaultStatus = 'EDITABLE') => {
-    const next = currentEffective === 'LOCKED' ? 'EDITABLE' : 'LOCKED';
-    setBulletOverrides(prev => {
-      const updated = { ...prev };
-      if (next === defaultStatus) {
-        delete updated[id];
-      } else {
-        updated[id] = next;
-      }
-      return updated;
-    });
-    setSaved(false);
-  }, []);
-
-  const toggleSkill = useCallback((cat, currentEffective, defaultStatus = 'EDITABLE') => {
-    const next = currentEffective === 'LOCKED' ? 'EDITABLE' : 'LOCKED';
-    setSkillOverrides(prev => {
-      const updated = { ...prev };
-      if (next === defaultStatus) {
-        delete updated[cat];
-      } else {
-        updated[cat] = next;
-      }
-      return updated;
-    });
-    setSaved(false);
-  }, []);
-
-  const toggleSummary = useCallback((currentEffective, defaultStatus = 'EDITABLE') => {
-    const next = currentEffective === 'LOCKED' ? 'EDITABLE' : 'LOCKED';
-    setSummaryOverride(next === defaultStatus ? null : next);
-    setSaved(false);
-  }, []);
-
-  const handleSave = async () => {
-    setSaving(true);
+  const handleUpload = async (file) => {
+    if (!file || !file.name.endsWith('.tex')) {
+      setError('Please upload a .tex file.');
+      return;
+    }
+    setUploading(true);
+    setError('');
+    setSuccess('');
+    const formData = new FormData();
+    formData.append('file', file);
     try {
-      const resp = await fetch('/api/base-resume/preferences', {
+      const resp = await fetch('/api/resumes/upload', { method: 'POST', body: formData });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.detail || 'Upload failed');
+      setResumes(prev => {
+        const exists = prev.find(r => r.slug === data.slug);
+        return exists ? prev.map(r => r.slug === data.slug ? data : r) : [...prev, data];
+      });
+      setSuccess(`Uploaded "${data.display_name}" successfully.`);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleSetActive = async (slug) => {
+    setError('');
+    setSuccess('');
+    try {
+      const resp = await fetch('/api/active-resume', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          bullets: bulletOverrides,
-          skill_categories: skillOverrides,
-          summary: summaryOverride,
-        }),
+        body: JSON.stringify({ slug }),
       });
-      if (!resp.ok) throw new Error('Save failed');
-      setSaved(true);
-    } catch {
-      setError('Failed to save preferences.');
-    } finally {
-      setSaving(false);
+      if (!resp.ok) throw new Error('Failed to set active resume');
+      setActiveSlug(slug);
+      const r = resumes.find(r => r.slug === slug);
+      setSuccess(`"${r?.display_name || slug}" is now the active resume.`);
+    } catch (e) {
+      setError(e.message);
     }
   };
 
-  const resetAll = () => {
-    setBulletOverrides({});
-    setSkillOverrides({});
-    setSummaryOverride(null);
-    setSaved(false);
+  const handleDelete = async (slug) => {
+    const r = resumes.find(r => r.slug === slug);
+    if (!window.confirm(`Delete "${r?.display_name || slug}"? This cannot be undone.`)) return;
+    setError('');
+    setSuccess('');
+    try {
+      const resp = await fetch(`/api/resumes/${slug}`, { method: 'DELETE' });
+      if (!resp.ok) throw new Error('Delete failed');
+      setResumes(prev => prev.filter(r => r.slug !== slug));
+      if (activeSlug === slug) setActiveSlug(null);
+      setSuccess(`Deleted "${r?.display_name || slug}".`);
+    } catch (e) {
+      setError(e.message);
+    }
   };
 
-  if (loading) {
-    return (
-      <div className="empty-state">
-        <p>Loading resume...</p>
-      </div>
-    );
-  }
-
-  if (error || !parsed) {
-    return (
-      <div>
-        <div className="page-header">
-          <h2>Base Resume</h2>
-        </div>
-        <div className="message message-error">
-          {error || 'No resume uploaded yet. Go to Home and upload your .tex file.'}
-        </div>
-      </div>
-    );
-  }
-
-  const header = parsed.header || {};
-  const sections = parsed.sections || [];
-
-  const totalBullets = sections.reduce((acc, sec) => {
-    if (sec.type === 'experience') {
-      return acc + sec.entries.reduce((a, e) => a + e.bullets.length, 0);
-    }
-    if (sec.type === 'projects') {
-      return acc + sec.projects.reduce((a, p) => a + p.bullets.length, 0);
-    }
-    return acc;
-  }, 0);
-
-  const overrideCount = Object.keys(bulletOverrides).length + Object.keys(skillOverrides).length
-    + (summaryOverride !== null ? 1 : 0);
-  const lockedCount = Object.values(bulletOverrides).filter(v => v === 'LOCKED').length
-    + Object.values(skillOverrides).filter(v => v === 'LOCKED').length
-    + (summaryOverride === 'LOCKED' ? 1 : 0);
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setDragOver(false);
+    const file = e.dataTransfer.files[0];
+    if (file) handleUpload(file);
+  };
 
   return (
     <div>
       <div className="page-header">
-        <h2>Base Resume</h2>
-        <p>Toggle which bullets Gemini can edit. Locked bullets are never changed.</p>
+        <h2>Base Resumes</h2>
+        <p>Upload and manage your LaTeX resume files. Set one as active for tailoring.</p>
       </div>
 
-      {/* Header summary */}
+      {error && <div className="message message-error">{error}</div>}
+      {success && <div className="message message-success">{success}</div>}
+
+      {/* Upload area */}
       <div className="card">
-        <div className="resume-meta">
-          <div className="resume-meta-name">{cleanLocked(header.name)}</div>
-          <div className="resume-meta-details">
-            {[cleanLocked(header.email), cleanLocked(header.phone)]
-              .filter(Boolean)
-              .join(' · ')}
-          </div>
-          <div className="resume-meta-stats">
-            <span className="meta-stat">{sections.length} sections</span>
-            <span className="meta-stat">{totalBullets} bullets</span>
-            {lockedCount > 0 && (
-              <span className="meta-stat meta-stat-locked">{lockedCount} user-locked</span>
-            )}
-          </div>
+        <h3>Upload Resume</h3>
+        <div
+          className={`upload-area${dragOver ? ' drag-over' : ''}`}
+          onClick={() => fileInputRef.current?.click()}
+          onDrop={handleDrop}
+          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+          onDragLeave={() => setDragOver(false)}
+        >
+          {uploading ? (
+            <p>Uploading...</p>
+          ) : (
+            <>
+              <p>Drag & drop your .tex file here</p>
+              <p>or click to browse</p>
+            </>
+          )}
         </div>
-
-        <div className="prefs-actions">
-          <button className="btn btn-secondary" onClick={resetAll}>
-            Reset All to Default
-          </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".tex"
+          style={{ display: 'none' }}
+          onChange={(e) => e.target.files[0] && handleUpload(e.target.files[0])}
+        />
+        <div style={{ marginTop: 12, textAlign: 'right' }}>
           <button
             className="btn btn-primary"
-            onClick={handleSave}
-            disabled={saving}
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
           >
-            {saving ? 'Saving...' : saved ? 'Saved ✓' : 'Save Preferences'}
+            {uploading ? 'Uploading...' : 'Choose File'}
           </button>
         </div>
       </div>
 
-      {sections.map((sec, si) => {
-        if (sec.type === 'experience') {
-          return (
-            <div key={si} className="card">
-              <h3 className="section-title">Work Experience</h3>
-              {sec.entries.map((entry, ei) => (
-                <div key={ei} className="exp-entry">
-                  <div className="exp-header">
-                    <span className="exp-company">{cleanLocked(entry.company)}</span>
-                    <span className="exp-title">{cleanLocked(entry.title)}</span>
-                    <span className="exp-dates">{cleanLocked(entry.dates)}</span>
-                  </div>
-                  <div className="bullets-list">
-                    {entry.bullets.map((b) => (
-                      <BulletRow
-                        key={b.id}
-                        bullet={b}
-                        override={bulletOverrides[b.id] ?? null}
-                        onToggle={() => toggleBullet(b.id, bulletOverrides[b.id] ?? b.status, b.status)}
-                      />
-                    ))}
-                  </div>
-                  {cleanLocked(entry.tech_stack) && (
-                    <div className="tech-stack-row">
-                      <span className="tech-stack-label">Tech Stack</span>
-                      <span className="tech-stack-items">{cleanLocked(entry.tech_stack)}</span>
+      {/* Resume list */}
+      <div className="card">
+        <h3>Your Resumes</h3>
+        {loading ? (
+          <p style={{ color: '#86868b', fontSize: 14 }}>Loading...</p>
+        ) : resumes.length === 0 ? (
+          <div className="empty-state" style={{ padding: '24px 0' }}>
+            <p>No resumes uploaded yet.</p>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {resumes.map((r) => {
+              const isActive = r.slug === activeSlug;
+              return (
+                <div
+                  key={r.slug}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 12,
+                    padding: '14px 16px',
+                    borderRadius: 10,
+                    border: isActive ? '1.5px solid #0071e3' : '1px solid #e5e5ea',
+                    background: isActive ? 'rgba(0,113,227,0.03)' : '#fafafa',
+                    transition: 'all 0.15s',
+                  }}
+                >
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, fontSize: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
+                      {r.display_name}
+                      {isActive && (
+                        <span className="meta-stat" style={{ background: 'rgba(0,113,227,0.1)', color: '#0071e3', fontSize: 11 }}>
+                          Active
+                        </span>
+                      )}
                     </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          );
-        }
-
-        if (sec.type === 'projects') {
-          return (
-            <div key={si} className="card">
-              <h3 className="section-title">Projects</h3>
-              {sec.projects.map((proj, pi) => (
-                <div key={pi} className="exp-entry">
-                  <div className="exp-header">
-                    <span className="exp-company">{cleanLocked(proj.name)}</span>
-                    {proj.dates && (
-                      <span className="exp-dates">{cleanLocked(proj.dates)}</span>
+                    <div style={{ fontSize: 12, color: '#86868b', marginTop: 2 }}>
+                      {r.filename} · {r.bullet_count} bullets
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+                    {!isActive && (
+                      <button
+                        className="btn btn-secondary"
+                        style={{ fontSize: 12, padding: '6px 14px' }}
+                        onClick={() => handleSetActive(r.slug)}
+                      >
+                        Set as Active
+                      </button>
                     )}
-                  </div>
-                  <div className="bullets-list">
-                    {proj.bullets.map((b) => (
-                      <BulletRow
-                        key={b.id}
-                        bullet={b}
-                        override={bulletOverrides[b.id] ?? null}
-                        onToggle={() => toggleBullet(b.id, bulletOverrides[b.id] ?? b.status, b.status)}
-                      />
-                    ))}
+                    <button
+                      className="btn btn-secondary"
+                      style={{ fontSize: 12, padding: '6px 14px', color: '#ff3b30', borderColor: 'rgba(255,59,48,0.3)' }}
+                      onClick={() => handleDelete(r.slug)}
+                    >
+                      Delete
+                    </button>
                   </div>
                 </div>
-              ))}
-            </div>
-          );
-        }
-
-        if (sec.type === 'skills') {
-          return (
-            <div key={si} className="card">
-              <h3 className="section-title">Skills</h3>
-              <div className="bullets-list">
-                {sec.skills.map((skill, ski) => {
-                  const cat = cleanLocked(skill.category);
-                  const effective = skillOverrides[cat] ?? skill.status;
-                  return (
-                    <div key={ski} className={`bullet-row ${effective === 'LOCKED' ? 'bullet-row-locked' : ''}`}>
-                      <StatusBadge
-                        status={effective}
-                        onToggle={() => toggleSkill(cat, effective, skill.status)}
-                      />
-                      <span className="bullet-text">
-                        {cat && <strong>{cat}: </strong>}
-                        {skill.items}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          );
-        }
-
-        if (sec.type === 'summary') {
-          const defaultSummaryStatus = sec.status ?? 'EDITABLE';
-          const effective = summaryOverride ?? defaultSummaryStatus;
-          return (
-            <div key={si} className="card">
-              <h3 className="section-title">Summary</h3>
-              <div className={`bullet-row ${effective === 'LOCKED' ? 'bullet-row-locked' : ''}`}>
-                <StatusBadge
-                  status={effective}
-                  onToggle={() => toggleSummary(effective, defaultSummaryStatus)}
-                />
-                <span className="bullet-text">{sec.text}</span>
-              </div>
-            </div>
-          );
-        }
-
-        return null;
-      })}
-
-      {/* Floating save bar — only shown when there are unsaved changes */}
-      {!saved && overrideCount > 0 && (
-        <div className="save-bar">
-          <span>{overrideCount} preference{overrideCount !== 1 ? 's' : ''} changed</span>
-          <button
-            className="btn btn-primary"
-            onClick={handleSave}
-            disabled={saving}
-          >
-            {saving ? 'Saving...' : 'Save Preferences'}
-          </button>
-        </div>
-      )}
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
