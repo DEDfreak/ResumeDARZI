@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 
 const STAGES = [
   { key: 'input', label: 'Preparing inputs' },
@@ -212,9 +212,9 @@ export default function Home() {
                   <>
                     <p className="filename">{resumeFile.name}</p>
                     {resumeInfo && (
-                      <p>{resumeInfo.sections || resumeInfo.editable_bullets} sections, {resumeInfo.editable_bullets} editable bullets</p>
+                      <p>{resumeInfo.sections} sections · {resumeInfo.editable_bullets} editable bullets</p>
                     )}
-                    <p style={{ marginTop: 8 }}>Click to replace</p>
+                    <p style={{ marginTop: 8, fontSize: 12 }}>Click to replace</p>
                   </>
                 ) : (
                   <>
@@ -230,6 +230,13 @@ export default function Home() {
                 style={{ display: 'none' }}
                 onChange={(e) => e.target.files[0] && handleFileUpload(e.target.files[0])}
               />
+              {resumeInfo && (
+                <p style={{ marginTop: 10, fontSize: 12, textAlign: 'center' }}>
+                  <Link to="/base-resume" style={{ color: '#0071e3' }}>
+                    Configure lock/edit preferences →
+                  </Link>
+                </p>
+              )}
             </>
           ) : (
             <>

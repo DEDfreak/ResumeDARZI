@@ -90,6 +90,36 @@ async def get_base_resume():
     return {"exists": False}
 
 
+@app.get("/api/base-resume/parsed")
+async def get_parsed_resume():
+    """Return the full parsed resume structure for the preferences editor."""
+    path = BASE_RESUME_DIR / "resume.tex"
+    if not path.exists():
+        raise HTTPException(404, "No base resume uploaded.")
+    parsed = parse_resume(path.read_text(encoding="utf-8"))
+    return parsed
+
+
+PREFS_FILE = BASE_RESUME_DIR / "preferences.json"
+
+
+@app.get("/api/base-resume/preferences")
+async def get_preferences():
+    if PREFS_FILE.exists():
+        try:
+            return json.loads(PREFS_FILE.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, IOError):
+            pass
+    return {"bullets": {}, "skill_categories": {}, "summary": None}
+
+
+@app.post("/api/base-resume/preferences")
+async def save_preferences(request: Request):
+    data = await request.json()
+    PREFS_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    return {"status": "saved"}
+
+
 # --- Settings ---
 
 @app.get("/api/settings")
@@ -171,13 +201,31 @@ async def generate(request: Request):
             })}
 
             parsed_original = parse_resume(base_tex)
+
+            # Apply user preferences (lock/edit overrides)
+            preferences = {}
+            if PREFS_FILE.exists():
+                try:
+                    preferences = json.loads(PREFS_FILE.read_text(encoding="utf-8"))
+                except (json.JSONDecodeError, IOError):
+                    pass
+            _apply_preferences(parsed_original, preferences)
+
             editable_bullets = get_editable_bullets(parsed_original)
             bullet_texts = [b["text"] for b in editable_bullets]
             fingerprint = extract_fingerprint(bullet_texts)
 
+            locked_count = sum(
+                1 for sec in parsed_original.get("sections", [])
+                for entry in (sec.get("entries", []) or sec.get("projects", []))
+                for b in entry.get("bullets", [])
+                if b.get("status") == "LOCKED"
+            )
+
             yield {"event": "progress", "data": json.dumps({
                 "stage": "parsing", "status": "done",
-                "message": f"Parsed {len(editable_bullets)} editable bullets."
+                "message": f"Parsed {len(editable_bullets)} editable bullets"
+                           + (f", {locked_count} user-locked." if locked_count else "."),
             })}
 
             # --- Stage 3: Extract JD ---
@@ -539,3 +587,29 @@ def _cover_letter_to_latex(text: str, company: str, job_title: str, parsed_resum
 
 \\end{{document}}
 """
+
+
+def _apply_preferences(parsed: dict, preferences: dict) -> None:
+    """Mutate parsed resume to apply user lock/edit overrides in-place."""
+    bullet_overrides: dict = preferences.get("bullets", {})
+    skill_overrides: dict = preferences.get("skill_categories", {})
+    summary_override: str | None = preferences.get("summary")
+
+    for sec in parsed.get("sections", []):
+        sec_type = sec.get("type")
+
+        if sec_type in ("experience", "projects"):
+            items = sec.get("entries", []) if sec_type == "experience" else sec.get("projects", [])
+            for entry in items:
+                for b in entry.get("bullets", []):
+                    if b["id"] in bullet_overrides:
+                        b["status"] = bullet_overrides[b["id"]]
+
+        elif sec_type == "skills":
+            for skill in sec.get("skills", []):
+                cat = skill.get("category", "").replace("LOCKED: ", "")
+                if cat in skill_overrides:
+                    skill["status"] = skill_overrides[cat]
+
+        elif sec_type == "summary" and summary_override:
+            sec["status"] = summary_override

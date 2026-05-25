@@ -541,6 +541,190 @@ body {
   border-radius: 8px;
 }
 
+/* Base Resume page */
+.resume-meta {
+  margin-bottom: 20px;
+}
+
+.resume-meta-name {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+}
+
+.resume-meta-details {
+  font-size: 13px;
+  color: #6e6e73;
+  margin-top: 4px;
+}
+
+.resume-meta-stats {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.meta-stat {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  background: #f5f5f7;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #6e6e73;
+}
+
+.meta-stat-locked {
+  background: rgba(255, 59, 48, 0.08);
+  color: #c0392b;
+}
+
+.prefs-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.section-title {
+  font-size: 14px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: #6e6e73;
+  margin-bottom: 16px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.exp-entry {
+  margin-bottom: 20px;
+}
+
+.exp-entry:last-child {
+  margin-bottom: 0;
+}
+
+.exp-header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.exp-company {
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.exp-title {
+  font-size: 13px;
+  color: #6e6e73;
+}
+
+.exp-dates {
+  font-size: 12px;
+  color: #a1a1a6;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.bullets-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.bullet-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #fafafa;
+  border: 1px solid transparent;
+  transition: all 0.15s;
+}
+
+.bullet-row-locked {
+  background: rgba(255, 59, 48, 0.04);
+  border-color: rgba(255, 59, 48, 0.12);
+}
+
+.bullet-text {
+  font-size: 13px;
+  line-height: 1.55;
+  color: #1d1d1f;
+  flex: 1;
+}
+
+.lock-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+
+.lock-badge-edit {
+  background: rgba(48, 209, 88, 0.1);
+  color: #248a3d;
+  border-color: rgba(48, 209, 88, 0.3);
+}
+
+.lock-badge-edit:hover {
+  background: rgba(48, 209, 88, 0.2);
+}
+
+.lock-badge-locked {
+  background: rgba(255, 59, 48, 0.08);
+  color: #c0392b;
+  border-color: rgba(255, 59, 48, 0.25);
+}
+
+.lock-badge-locked:hover {
+  background: rgba(255, 59, 48, 0.15);
+}
+
+/* Floating save bar */
+.save-bar {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #1d1d1f;
+  color: #f5f5f7;
+  padding: 12px 20px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 13px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.25);
+  z-index: 200;
+  animation: slideUp 0.2s ease;
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateX(-50%) translateY(8px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+.save-bar .btn-primary {
+  background: #0071e3;
+  padding: 8px 16px;
+  font-size: 13px;
+}
+
 /* Empty state */
 .empty-state {
   text-align: center;

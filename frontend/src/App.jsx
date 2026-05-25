@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom';
 import Home from './pages/Home';
 import Result from './pages/Result';
 import Settings from './pages/Settings';
+import BaseResume from './pages/BaseResume';
 import './App.css';
 
 function App() {
@@ -17,6 +18,11 @@ function App() {
             <li>
               <NavLink to="/" end className={({ isActive }) => isActive ? 'active' : ''}>
                 Home
+              </NavLink>
+            </li>
+            <li>
+              <NavLink to="/base-resume" className={({ isActive }) => isActive ? 'active' : ''}>
+                Base Resume
               </NavLink>
             </li>
             <li>
@@ -37,6 +43,7 @@ function App() {
         <main className="content">
           <Routes>
             <Route path="/" element={<Home />} />
+            <Route path="/base-resume" element={<BaseResume />} />
             <Route path="/result" element={<Result />} />
             <Route path="/settings" element={<Settings />} />
           </Routes>

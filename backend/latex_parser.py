@@ -11,6 +11,29 @@ import copy
 from typing import Optional
 
 
+def _extract_brace_args(text: str, n: int) -> list[str]:
+    """Extract n brace-balanced arguments from text (which should start with '{')."""
+    args = []
+    pos = 0
+    for _ in range(n):
+        while pos < len(text) and text[pos] != '{':
+            pos += 1
+        if pos >= len(text):
+            break
+        depth = 0
+        start = pos + 1
+        for i in range(pos, len(text)):
+            if text[i] == '{':
+                depth += 1
+            elif text[i] == '}':
+                depth -= 1
+                if depth == 0:
+                    args.append(text[start:i])
+                    pos = i + 1
+                    break
+    return args
+
+
 # Patterns for detecting LaTeX resume structures
 # Matches both \section{} and \resheading{} and similar custom commands
 SECTION_RE = re.compile(r'\\(?:section|subsection|resheading|sectiontitle)\{([^}]+)\}', re.IGNORECASE)
@@ -209,22 +232,37 @@ def parse_experience_section(lines: list[str]) -> list[dict]:
             in_itemize = False
             continue
 
-        # Check for resumeSubheading or ressubheading pattern (case-insensitive)
-        sub_match = re.search(
-            r'\\res(?:ubheading|SubHeading)\{([^}]*)\}\{([^}]*)\}\{([^}]*)\}\{([^}]*)\}',
+        # 4-arg: \resumeSubheading{company}{location}{title}{dates}
+        sub_match4 = re.search(
+            r'\\resumeSubheading\{([^}]*)\}\{([^}]*)\}\{([^}]*)\}\{([^}]*)\}',
             stripped, re.IGNORECASE
         )
+        # 3-arg: \ressubheading{company}{title}{dates}
+        sub_match3 = re.search(
+            r'\\ressubheading\{([^}]*)\}\{([^}]*)\}\{([^}]*)\}',
+            stripped, re.IGNORECASE
+        ) if not sub_match4 else None
+
+        sub_match = sub_match4 or sub_match3
         if sub_match:
             if current_entry:
                 current_entry["bullets"] = current_bullets
                 entries.append(current_entry)
                 current_bullets = []
-            current_entry = {
-                "company": sub_match.group(1).strip(),
-                "location": sub_match.group(2).strip(),
-                "title": sub_match.group(3).strip(),
-                "dates": sub_match.group(4).strip(),
-            }
+            if sub_match4:
+                current_entry = {
+                    "company": sub_match.group(1).strip(),
+                    "location": sub_match.group(2).strip(),
+                    "title": sub_match.group(3).strip(),
+                    "dates": sub_match.group(4).strip(),
+                }
+            else:
+                current_entry = {
+                    "company": sub_match.group(1).strip(),
+                    "location": "",
+                    "title": sub_match.group(2).strip(),
+                    "dates": sub_match.group(3).strip(),
+                }
             continue
 
         # Check for resumeSubHeadingListStart/End
@@ -265,7 +303,7 @@ def parse_experience_section(lines: list[str]) -> list[dict]:
             continue
 
         # Check for \\item bullets
-        item_match = re.search(r'\\(?:resumeItem|item)\s*[\[\{]?\s*(.*)', stripped)
+        item_match = re.search(r'\\(?:resumeItem|item)(?![a-zA-Z])\s*[\[\{]?\s*(.*)', stripped)
         if item_match:
             bullet_text = item_match.group(1).strip()
             # Clean up trailing braces
@@ -293,9 +331,11 @@ def parse_education_section(lines: list[str]) -> list[dict]:
         if 'resumeSubHeadingListStart' in stripped or 'resumeSubHeadingListEnd' in stripped:
             continue
 
+        # \resumeSubheading{institution}{dates}{degree}{details}
         sub_match = re.search(
             r'\\resumeSubheading\{([^}]*)\}\{([^}]*)\}\{([^}]*)\}\{([^}]*)\}', stripped
         )
+
         if sub_match:
             if current_entry:
                 entries.append(current_entry)
@@ -306,6 +346,26 @@ def parse_education_section(lines: list[str]) -> list[dict]:
                 "details": sub_match.group(4).strip(),
             }
             continue
+
+        # \eduheading{institution}{location}{degree}{dates}
+        # Use brace-balanced extractor because degree may contain nested commands
+        edu_pos = stripped.find('\\eduheading')
+        if edu_pos != -1:
+            args = _extract_brace_args(stripped[edu_pos + len('\\eduheading'):], 4)
+            if len(args) == 4:
+                if current_entry:
+                    entries.append(current_entry)
+                degree_raw = args[2].strip()
+                degree_clean = re.sub(r'\\textnormal\{([^}]*)\}', r'\1', degree_raw)
+                degree_clean = re.sub(r'\\[a-zA-Z]+\{([^}]*)\}', r'\1', degree_clean).strip()
+                current_entry = {
+                    "institution": args[0].strip(),
+                    "location": args[1].strip(),
+                    "degree": degree_clean,
+                    "dates": args[3].strip(),
+                    "details": "",
+                }
+                continue
 
         bold_match = re.search(r'\\textbf\{([^}]+)\}', stripped)
         if bold_match and not current_entry:
@@ -342,14 +402,18 @@ def parse_skills_section(lines: list[str]) -> list[dict]:
         if 'resumeSubHeadingListStart' in stripped or 'resumeSubHeadingListEnd' in stripped:
             continue
 
-        # Pattern: \textbf{Category}: skill1, skill2
-        cat_match = re.search(r'\\textbf\{([^}]+)\}\s*[:\-]\s*(.*)', stripped)
-        if cat_match:
-            skills.append({
-                "category": cat_match.group(1).strip(),
-                "items": cat_match.group(2).strip().rstrip('\\').strip(),
-            })
-            continue
+        # Pattern: \textbf{Category:} items  OR  \textbf{Category}: items
+        # The colon may be inside the braces (e.g. \textbf{Languages:}) or after them
+        cat_match = re.search(r'\\textbf\{([^}]+?):?\}\s*[:\s]*(.*?)(?:\\\\)?\s*$', stripped)
+        if cat_match and cat_match.group(2).strip():
+            category = cat_match.group(1).strip().rstrip(':')
+            items = re.sub(r'^[:\-\s]+', '', cat_match.group(2)).rstrip('\\').strip()
+            if items:
+                skills.append({
+                    "category": category,
+                    "items": items,
+                })
+                continue
 
         # Pattern: \resumeItem{Category}{skills}
         item_match = re.search(r'\\resumeItem\{([^}]*)\}\{([^}]*)\}', stripped)
@@ -385,26 +449,63 @@ def parse_projects_section(lines: list[str]) -> list[dict]:
                                           '\\begin{itemize}', '\\end{itemize}']):
             continue
 
-        # Project heading patterns
-        proj_match = re.search(r'\\resumeProjectHeading\{([^}]*)\}\{([^}]*)\}', stripped)
-        if not proj_match:
-            proj_match = re.search(r'\\textbf\{([^}]+)\}', stripped)
-
-        if proj_match and '\\item' not in stripped.split('\\textbf')[0] if '\\textbf' in stripped else proj_match:
+        # Pattern 1: \resumeProjectHeading{name}{dates}
+        rph_match = re.search(r'\\resumeProjectHeading\{([^}]*)\}\{([^}]*)\}', stripped)
+        if rph_match:
             if current_project:
                 current_project["bullets"] = current_bullets
                 projects.append(current_project)
                 current_bullets = []
-
-            name = proj_match.group(1).strip()
-            dates = proj_match.group(2).strip() if proj_match.lastindex and proj_match.lastindex >= 2 else ""
             current_project = {
-                "name": name,
-                "dates": dates,
+                "name": rph_match.group(1).strip(),
+                "dates": rph_match.group(2).strip(),
             }
             continue
 
-        item_match = re.search(r'\\(?:resumeItem|item)\s*[\[\{]?\s*(.*)', stripped)
+        # Pattern 2: \textbf{\href{url}{\underline{\textcolor{blue}{Name}}}}: description
+        # (inline single-line project format)
+        if '\\textbf{' in stripped and '\\href{' in stripped and '\\item' not in stripped:
+            # Extract display name from \textcolor{blue}{Name} or innermost {...}
+            name_m = re.search(r'\\textcolor\{[^}]+\}\{([^}]+)\}', stripped)
+            if not name_m:
+                # Fallback: last {word chars} before }}:
+                name_m = re.search(r'\{([A-Za-z][^{}]{0,60})\}\s*\}+\s*:', stripped)
+
+            # Extract description after the closing brace cluster + colon
+            desc_m = re.search(r'\}+\s*:\s*(.+)$', stripped)
+
+            if name_m and desc_m:
+                if current_project:
+                    current_project["bullets"] = current_bullets
+                    projects.append(current_project)
+                    current_bullets = []
+                projects.append({
+                    "name": name_m.group(1).strip(),
+                    "dates": "",
+                    "bullets": [desc_m.group(1).strip()],
+                })
+                current_project = None
+                current_bullets = []
+                continue
+
+        # Pattern 3: plain \textbf{Name}: description (no href)
+        if '\\textbf{' in stripped and '\\item' not in stripped and '\\href{' not in stripped:
+            plain_m = re.search(r'\\textbf\{([^}]+)\}\s*[:\-]\s*(.+)$', stripped)
+            if plain_m:
+                if current_project:
+                    current_project["bullets"] = current_bullets
+                    projects.append(current_project)
+                    current_bullets = []
+                projects.append({
+                    "name": plain_m.group(1).strip(),
+                    "dates": "",
+                    "bullets": [plain_m.group(2).strip()],
+                })
+                current_project = None
+                current_bullets = []
+                continue
+
+        item_match = re.search(r'\\(?:resumeItem|item)(?![a-zA-Z])\s*[\[\{]?\s*(.*)', stripped)
         if item_match:
             text = item_match.group(1).strip().rstrip('}').strip()
             if text:
@@ -423,6 +524,7 @@ def parse_resume(tex_content: str) -> dict:
     EDITABLE and LOCKED zones.
     """
     header_lines, sections = split_into_sections(tex_content)
+    print("Header lines:", header_lines, "Sections found:", [s["name"] for s in sections])
     header_info = extract_header_info(tex_content.split('\n'))
 
     bullet_counter = 0
@@ -437,6 +539,7 @@ def parse_resume(tex_content: str) -> dict:
 
         if sec_type == "experience":
             entries = parse_experience_section(sec["lines"])
+            print("entries:",entries)
             parsed_entries = []
             for entry in entries:
                 bullets = []
@@ -458,6 +561,7 @@ def parse_resume(tex_content: str) -> dict:
 
         elif sec_type == "education":
             entries = parse_education_section(sec["lines"])
+            print("education entries:", entries)
             parsed["entries"] = [
                 {
                     "institution": f"LOCKED: {e.get('institution', '')}",
@@ -470,6 +574,7 @@ def parse_resume(tex_content: str) -> dict:
 
         elif sec_type == "skills":
             skill_list = parse_skills_section(sec["lines"])
+            print("skills:", skill_list)
             parsed["skills"] = [
                 {
                     "category": f"LOCKED: {s['category']}" if s['category'] else "",
@@ -481,6 +586,7 @@ def parse_resume(tex_content: str) -> dict:
 
         elif sec_type == "projects":
             projects = parse_projects_section(sec["lines"])
+            print("projects:", projects)
             parsed_projects = []
             for proj in projects:
                 bullets = []
