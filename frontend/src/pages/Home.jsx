@@ -38,7 +38,7 @@ export default function Home() {
         setResumes(resumeList);
         setActiveSlug(activeData.slug || (resumeList[0]?.slug ?? null));
       })
-      .catch(() => {})
+      .catch(() => { setError('Failed to load resumes.'); })
       .finally(() => setLoadingResumes(false));
   }, []);
 
@@ -96,6 +96,7 @@ export default function Home() {
             try {
               const data = JSON.parse(line.slice(6));
               handleSSEData(data);
+            // eslint-disable-next-line no-empty
             } catch {}
           }
         }
