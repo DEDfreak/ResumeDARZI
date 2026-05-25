@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 
 const STAGES = [
@@ -15,12 +15,10 @@ const STAGES = [
 
 export default function Home() {
   const navigate = useNavigate();
-  const fileInputRef = useRef(null);
 
-  const [resumeFile, setResumeFile] = useState(null);
-  const [resumeInfo, setResumeInfo] = useState(null);
-  const [resumeMode, setResumeMode] = useState('file'); // 'file' or 'paste'
-  const [pastedLatex, setPastedLatex] = useState('');
+  const [resumes, setResumes] = useState([]);
+  const [activeSlug, setActiveSlug] = useState(null);
+  const [loadingResumes, setLoadingResumes] = useState(true);
   const [jdText, setJdText] = useState('');
   const [jdUrl, setJdUrl] = useState('');
   const [companyName, setCompanyName] = useState('');
@@ -30,74 +28,36 @@ export default function Home() {
   const [progress, setProgress] = useState({});
   const [error, setError] = useState('');
 
-  // Check if base resume already exists
+  // Load resumes and active slug
   useEffect(() => {
-    fetch('/api/base-resume')
-      .then(r => r.json())
-      .then(data => {
-        if (data.exists) {
-          setResumeInfo(data);
-          setResumeFile({ name: data.filename });
-        }
+    Promise.all([
+      fetch('/api/resumes').then(r => r.json()),
+      fetch('/api/active-resume').then(r => r.json()),
+    ])
+      .then(([resumeList, activeData]) => {
+        setResumes(resumeList);
+        setActiveSlug(activeData.slug || (resumeList[0]?.slug ?? null));
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setLoadingResumes(false));
   }, []);
 
-  const handleFileUpload = async (file) => {
-    if (!file || !file.name.endsWith('.tex')) {
-      setError('Please upload a .tex file.');
-      return;
-    }
-
-    const formData = new FormData();
-    formData.append('file', file);
-
+  const handleResumeChange = async (slug) => {
+    setActiveSlug(slug);
+    setError('');
     try {
-      const resp = await fetch('/api/upload-resume', { method: 'POST', body: formData });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data.detail || 'Upload failed');
-
-      setResumeFile(file);
-      setResumeInfo(data);
-      setError('');
-    } catch (e) {
-      setError(e.message);
-    }
-  };
-
-  const handleDrop = (e) => {
-    e.preventDefault();
-    const file = e.dataTransfer.files[0];
-    if (file) handleFileUpload(file);
-  };
-
-  const handlePasteLatex = async () => {
-    if (!pastedLatex.trim()) {
-      setError('Please paste LaTeX code.');
-      return;
-    }
-
-    const formData = new FormData();
-    const blob = new Blob([pastedLatex], { type: 'text/plain' });
-    const file = new File([blob], 'resume.tex', { type: 'text/plain' });
-    formData.append('file', file);
-
-    try {
-      const resp = await fetch('/api/upload-resume', { method: 'POST', body: formData });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data.detail || 'Upload failed');
-
-      setResumeFile({ name: 'resume.tex (pasted)' });
-      setResumeInfo(data);
-      setError('');
-      setResumeMode('file');
-    } catch (e) {
-      setError(e.message);
+      await fetch('/api/active-resume', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slug }),
+      });
+    } catch {
+      setError('Failed to set active resume.');
     }
   };
 
   const handleGenerate = async () => {
-    if (!resumeFile) return setError('Please upload your resume first.');
+    if (!activeSlug) return setError('Please select a base resume first.');
     if (!companyName.trim()) return setError('Company name is required.');
     if (!jobTitle.trim()) return setError('Job title is required.');
     if (!jdText.trim() && !jdUrl.trim()) return setError('Please provide a job description.');
@@ -137,8 +97,6 @@ export default function Home() {
               const data = JSON.parse(line.slice(6));
               handleSSEData(data);
             } catch {}
-          } else if (line.startsWith('event: ')) {
-            // Event type is handled in the data
           }
         }
       }
@@ -156,111 +114,81 @@ export default function Home() {
         [data.stage]: { status: data.status, message: data.message },
       }));
     }
-
     if (data.error) {
       setError(data.error);
       setIsGenerating(false);
     }
-
-    // Check if this is the complete result
     if (data.folder) {
       localStorage.setItem('lastResult', JSON.stringify(data));
       navigate('/result');
     }
   };
 
-  const canGenerate = resumeFile && companyName.trim() && jobTitle.trim() && (jdText.trim() || jdUrl.trim());
-  const canPaste = pastedLatex.trim().length > 0;
+  const activeResume = resumes.find(r => r.slug === activeSlug);
+  const canGenerate = activeSlug && companyName.trim() && jobTitle.trim() && (jdText.trim() || jdUrl.trim());
 
   return (
     <div>
       <div className="page-header">
         <h2>Tailor Your Resume</h2>
-        <p>Upload your LaTeX resume and paste a job description to get started.</p>
+        <p>Select a base resume and paste a job description to get started.</p>
       </div>
 
       {error && <div className="message message-error">{error}</div>}
 
       <div className="two-col">
-        {/* Left: Resume upload / paste */}
+        {/* Left: Resume selector */}
         <div className="card">
           <h3>Base Resume</h3>
-          <div className="tab-bar" style={{ marginBottom: 16 }}>
-            <button
-              className={resumeMode === 'file' ? 'active' : ''}
-              onClick={() => setResumeMode('file')}
-            >
-              Upload File
-            </button>
-            <button
-              className={resumeMode === 'paste' ? 'active' : ''}
-              onClick={() => setResumeMode('paste')}
-            >
-              Paste Code
-            </button>
-          </div>
-
-          {resumeMode === 'file' ? (
-            <>
-              <div
-                className={`upload-area ${resumeFile ? 'has-file' : ''}`}
-                onClick={() => fileInputRef.current?.click()}
-                onDrop={handleDrop}
-                onDragOver={(e) => e.preventDefault()}
-              >
-                {resumeFile ? (
-                  <>
-                    <p className="filename">{resumeFile.name}</p>
-                    {resumeInfo && (
-                      <p>{resumeInfo.sections} sections · {resumeInfo.editable_bullets} editable bullets</p>
-                    )}
-                    <p style={{ marginTop: 8, fontSize: 12 }}>Click to replace</p>
-                  </>
-                ) : (
-                  <>
-                    <p>Drag & drop your .tex file here</p>
-                    <p>or click to browse</p>
-                  </>
-                )}
+          {loadingResumes ? (
+            <p style={{ color: '#86868b', fontSize: 14 }}>Loading resumes...</p>
+          ) : resumes.length === 0 ? (
+            <div>
+              <div className="message message-warning" style={{ marginBottom: 12 }}>
+                No resumes uploaded yet.
               </div>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".tex"
-                style={{ display: 'none' }}
-                onChange={(e) => e.target.files[0] && handleFileUpload(e.target.files[0])}
-              />
-              {resumeInfo && (
-                <p style={{ marginTop: 10, fontSize: 12, textAlign: 'center' }}>
-                  <Link to="/base-resume" style={{ color: '#0071e3' }}>
+              <Link to="/base-resume" className="btn btn-primary" style={{ display: 'inline-flex' }}>
+                Upload a Resume
+              </Link>
+            </div>
+          ) : (
+            <>
+              <div className="form-group">
+                <label>Select Resume</label>
+                <select
+                  value={activeSlug || ''}
+                  onChange={(e) => handleResumeChange(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '10px 14px',
+                    border: '1px solid #d2d2d7',
+                    borderRadius: 8,
+                    fontSize: 14,
+                    background: '#fafafa',
+                    fontFamily: 'inherit',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {resumes.map(r => (
+                    <option key={r.slug} value={r.slug}>
+                      {r.display_name} — {r.bullet_count} bullets
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {activeResume && (
+                <p style={{ fontSize: 12, color: '#86868b' }}>
+                  {activeResume.filename} · {activeResume.bullet_count} bullets ·{' '}
+                  <Link to="/resume-configuration" style={{ color: '#0071e3' }}>
                     Configure lock/edit preferences →
                   </Link>
                 </p>
               )}
-            </>
-          ) : (
-            <>
-              <div className="form-group">
-                <label>LaTeX Code</label>
-                <textarea
-                  rows={10}
-                  value={pastedLatex}
-                  onChange={(e) => setPastedLatex(e.target.value)}
-                  placeholder="\documentclass{article}&#10;\begin{document}&#10;..."
-                  style={{
-                    fontFamily: "'SF Mono', 'Fira Code', 'Cascadia Code', monospace",
-                    fontSize: 12,
-                  }}
-                />
-              </div>
-              <button
-                className="btn btn-primary"
-                onClick={handlePasteLatex}
-                disabled={!canPaste}
-                style={{ width: '100%' }}
-              >
-                Save LaTeX Resume
-              </button>
+              <p style={{ fontSize: 12, color: '#86868b', marginTop: 8 }}>
+                <Link to="/base-resume" style={{ color: '#0071e3' }}>
+                  Manage resumes →
+                </Link>
+              </p>
             </>
           )}
         </div>
