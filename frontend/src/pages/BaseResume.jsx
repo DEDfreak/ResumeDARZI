@@ -8,6 +8,8 @@ export default function BaseResume() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [dragOver, setDragOver] = useState(false);
+  const [uploadTab, setUploadTab] = useState('file');
+  const [pasteCode, setPasteCode] = useState('');
   const fileInputRef = useRef(null);
 
   const fetchAll = async () => {
@@ -96,6 +98,32 @@ export default function BaseResume() {
     if (file) handleUpload(file);
   };
 
+  const handlePasteSave = async () => {
+    if (!pasteCode.trim()) {
+      setError('Please paste some LaTeX code first.');
+      return;
+    }
+    setUploading(true);
+    setError('');
+    setSuccess('');
+    const blob = new Blob([pasteCode], { type: 'text/plain' });
+    const file = new File([blob], 'resume.tex', { type: 'text/plain' });
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      const resp = await fetch('/api/resumes/upload', { method: 'POST', body: formData });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.detail || 'Upload failed');
+      await fetchAll();
+      setSuccess(`Saved "${data.display_name}" successfully.`);
+      setPasteCode('');
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setUploading(false);
+    }
+  };
+
   return (
     <div>
       <div className="page-header">
@@ -109,38 +137,87 @@ export default function BaseResume() {
       {/* Upload area */}
       <div className="card">
         <h3>Upload Resume</h3>
-        <div
-          className={`upload-area${dragOver ? ' drag-over' : ''}`}
-          onClick={() => fileInputRef.current?.click()}
-          onDrop={handleDrop}
-          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-          onDragLeave={() => setDragOver(false)}
-        >
-          {uploading ? (
-            <p>Uploading...</p>
-          ) : (
-            <>
-              <p>Drag & drop your .tex file here</p>
-              <p>or click to browse</p>
-            </>
-          )}
-        </div>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".tex"
-          style={{ display: 'none' }}
-          onChange={(e) => e.target.files[0] && handleUpload(e.target.files[0])}
-        />
-        <div style={{ marginTop: 12, textAlign: 'right' }}>
+        <div className="tab-bar">
           <button
-            className="btn btn-primary"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
+            className={`tab-btn${uploadTab === 'file' ? ' active' : ''}`}
+            onClick={() => setUploadTab('file')}
           >
-            {uploading ? 'Uploading...' : 'Choose File'}
+            Upload File
+          </button>
+          <button
+            className={`tab-btn${uploadTab === 'paste' ? ' active' : ''}`}
+            onClick={() => setUploadTab('paste')}
+          >
+            Paste Code
           </button>
         </div>
+
+        {uploadTab === 'file' ? (
+          <>
+            <div
+              className={`upload-area${dragOver ? ' drag-over' : ''}`}
+              onClick={() => fileInputRef.current?.click()}
+              onDrop={handleDrop}
+              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+              onDragLeave={() => setDragOver(false)}
+            >
+              {uploading ? (
+                <p>Uploading...</p>
+              ) : (
+                <>
+                  <p>Drag & drop your .tex file here</p>
+                  <p>or click to browse</p>
+                </>
+              )}
+            </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".tex"
+              style={{ display: 'none' }}
+              onChange={(e) => e.target.files[0] && handleUpload(e.target.files[0])}
+            />
+            <div style={{ marginTop: 12, textAlign: 'right' }}>
+              <button
+                className="btn btn-primary"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
+              >
+                {uploading ? 'Uploading...' : 'Choose File'}
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <textarea
+              value={pasteCode}
+              onChange={(e) => setPasteCode(e.target.value)}
+              placeholder="Paste your LaTeX resume code here..."
+              rows={12}
+              style={{
+                width: '100%',
+                fontFamily: 'monospace',
+                fontSize: 12,
+                padding: '10px',
+                border: '1px solid #d2d2d7',
+                borderRadius: 8,
+                resize: 'vertical',
+                background: '#fafafa',
+                boxSizing: 'border-box',
+                marginTop: 8,
+              }}
+            />
+            <div style={{ marginTop: 12, textAlign: 'right' }}>
+              <button
+                className="btn btn-primary"
+                onClick={handlePasteSave}
+                disabled={uploading}
+              >
+                {uploading ? 'Saving...' : 'Save Resume'}
+              </button>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Resume list */}
