@@ -302,6 +302,14 @@ def parse_experience_section(lines: list[str]) -> list[dict]:
                 current_entry["dates"] = dates_found[0]
             continue
 
+        # Tech Stack line: {\small \underline{Tech Stack:} item1, item2, ...}
+        tech_match = re.search(r'\\underline\{Tech Stack:\}\s*(.*)', stripped, re.IGNORECASE)
+        if tech_match and current_entry is not None:
+            tech_text = tech_match.group(1).rstrip('}').strip()
+            if tech_text:
+                current_entry["tech_stack"] = tech_text
+            continue
+
         # Check for \\item bullets
         item_match = re.search(r'\\(?:resumeItem|item)(?![a-zA-Z])\s*[\[\{]?\s*(.*)', stripped)
         if item_match:
@@ -524,7 +532,6 @@ def parse_resume(tex_content: str) -> dict:
     EDITABLE and LOCKED zones.
     """
     header_lines, sections = split_into_sections(tex_content)
-    print("Header lines:", header_lines, "Sections found:", [s["name"] for s in sections])
     header_info = extract_header_info(tex_content.split('\n'))
 
     bullet_counter = 0
@@ -539,7 +546,6 @@ def parse_resume(tex_content: str) -> dict:
 
         if sec_type == "experience":
             entries = parse_experience_section(sec["lines"])
-            print("entries:",entries)
             parsed_entries = []
             for entry in entries:
                 bullets = []
@@ -555,13 +561,13 @@ def parse_resume(tex_content: str) -> dict:
                     "title": f"LOCKED: {entry.get('title', '')}",
                     "dates": f"LOCKED: {entry.get('dates', '')}",
                     "location": f"LOCKED: {entry.get('location', '')}",
+                    "tech_stack": f"LOCKED: {entry.get('tech_stack', '')}",
                     "bullets": bullets,
                 })
             parsed["entries"] = parsed_entries
 
         elif sec_type == "education":
             entries = parse_education_section(sec["lines"])
-            print("education entries:", entries)
             parsed["entries"] = [
                 {
                     "institution": f"LOCKED: {e.get('institution', '')}",
@@ -574,7 +580,6 @@ def parse_resume(tex_content: str) -> dict:
 
         elif sec_type == "skills":
             skill_list = parse_skills_section(sec["lines"])
-            print("skills:", skill_list)
             parsed["skills"] = [
                 {
                     "category": f"LOCKED: {s['category']}" if s['category'] else "",
@@ -586,7 +591,6 @@ def parse_resume(tex_content: str) -> dict:
 
         elif sec_type == "projects":
             projects = parse_projects_section(sec["lines"])
-            print("projects:", projects)
             parsed_projects = []
             for proj in projects:
                 bullets = []

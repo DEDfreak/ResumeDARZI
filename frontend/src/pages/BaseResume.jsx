@@ -202,6 +202,12 @@ export default function BaseResume() {
                       />
                     ))}
                   </div>
+                  {cleanLocked(entry.tech_stack) && (
+                    <div className="tech-stack-row">
+                      <span className="tech-stack-label">Tech Stack</span>
+                      <span className="tech-stack-items">{cleanLocked(entry.tech_stack)}</span>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
