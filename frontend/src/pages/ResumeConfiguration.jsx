@@ -207,21 +207,25 @@ export default function ResumeConfiguration() {
           <div className="card">
             <div className="resume-meta">
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
-                <input
-                  type="text"
-                  value={displayName}
-                  onChange={(e) => { setDisplayName(e.target.value); setSaved(false); }}
-                  placeholder="Display name"
-                  style={{
-                    fontSize: 18,
-                    fontWeight: 700,
-                    border: '1px solid #d2d2d7',
-                    borderRadius: 8,
-                    padding: '6px 12px',
-                    flex: 1,
-                    background: '#fafafa',
-                  }}
-                />
+                {expanded ? (
+                  <input
+                    type="text"
+                    value={displayName}
+                    onChange={(e) => { setDisplayName(e.target.value); setSaved(false); }}
+                    placeholder="Display name"
+                    style={{
+                      fontSize: 18,
+                      fontWeight: 700,
+                      border: '1px solid #d2d2d7',
+                      borderRadius: 8,
+                      padding: '6px 12px',
+                      flex: 1,
+                      background: '#fafafa',
+                    }}
+                  />
+                ) : (
+                  <div style={{ fontSize: 18, fontWeight: 700, padding: '6px 0' }}>{displayName}</div>
+                )}
               </div>
               <div className="resume-meta-details">
                 {[cleanLocked(header.name), cleanLocked(header.email), cleanLocked(header.phone)]
@@ -241,7 +245,7 @@ export default function ResumeConfiguration() {
                 <>
                   <button className="btn btn-secondary" onClick={resetAll}>Reset All</button>
                   <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
-                    {saving ? 'Saving...' : saved ? 'Saved ✓' : 'Save Preferences'}
+                    {saving ? 'Saving...' : 'Save Preferences'}
                   </button>
                 </>
               ) : (

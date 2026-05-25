@@ -121,11 +121,17 @@ def extract_header_info(lines: list[str]) -> dict:
         # Check for name commands
         name_match = re.search(r'\\(?:name|Name|LARGE|huge|Huge|textbf)\{([^}]+)\}', stripped)
         if name_match and not name:
-            name = name_match.group(1).strip()
+            candidate = name_match.group(1).strip()
+            # Skip LaTeX placeholders like #1, #2
+            if '#' in candidate:
+                continue
+            # Strip nested LaTeX commands (e.g. \huge, \textbf, etc.)
+            candidate = re.sub(r'\\[a-zA-Z]+\s+', '', candidate).strip()
+            name = candidate
             break
         # Check for centered large text that looks like a name
         clean = re.sub(r'\\[a-zA-Z]+\{?', '', stripped).replace('}', '').replace('{', '').strip()
-        if clean and not re.match(r'^\\', clean) and len(clean.split()) <= 5 and not EMAIL_RE.search(clean) and not name:
+        if clean and '#' not in clean and not re.match(r'^\\', clean) and len(clean.split()) <= 5 and not EMAIL_RE.search(clean) and not name:
             name = clean
             break
 
