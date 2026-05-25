@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 export default function BaseResume() {
+  const navigate = useNavigate();
   const [resumes, setResumes] = useState([]);
   const [activeSlug, setActiveSlug] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -277,6 +279,13 @@ export default function BaseResume() {
                         Set as Active
                       </button>
                     )}
+                    <button
+                      className="btn btn-secondary"
+                      style={{ fontSize: 12, padding: '6px 14px' }}
+                      onClick={() => navigate(`/resume-configuration?slug=${r.slug}`)}
+                    >
+                      Configure
+                    </button>
                     <button
                       className="btn btn-secondary"
                       style={{ fontSize: 12, padding: '6px 14px', color: '#ff3b30', borderColor: 'rgba(255,59,48,0.3)' }}

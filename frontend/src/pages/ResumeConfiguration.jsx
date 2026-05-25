@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 
 function cleanLocked(str) {
   return typeof str === 'string' ? str.replace(/^LOCKED:\s*/, '') : str;
@@ -28,6 +29,7 @@ function BulletRow({ bullet, override, onToggle }) {
 }
 
 export default function ResumeConfiguration() {
+  const [searchParams] = useSearchParams();
   const [resumes, setResumes] = useState([]);
   const [selectedSlug, setSelectedSlug] = useState('');
   const [parsed, setParsed] = useState(null);
@@ -44,11 +46,15 @@ export default function ResumeConfiguration() {
 
   // Load resume list
   useEffect(() => {
+    const paramSlug = searchParams.get('slug');
     fetch('/api/resumes')
       .then(r => r.json())
       .then(data => {
         setResumes(data);
-        // Also try to pick the active one
+        if (paramSlug && data.find(r => r.slug === paramSlug)) {
+          setSelectedSlug(paramSlug);
+          return;
+        }
         return fetch('/api/active-resume').then(r => r.json()).then(active => {
           if (active.slug && data.find(r => r.slug === active.slug)) {
             setSelectedSlug(active.slug);
@@ -58,7 +64,7 @@ export default function ResumeConfiguration() {
         });
       })
       .catch(() => setError('Failed to load resumes.'));
-  }, []);
+  }, [searchParams]);
 
   // Load parsed + prefs when slug changes
   useEffect(() => {
