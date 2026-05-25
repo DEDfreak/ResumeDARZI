@@ -34,6 +34,7 @@ export default function ResumeConfiguration() {
   const [displayName, setDisplayName] = useState('');
   const [bulletOverrides, setBulletOverrides] = useState({});
   const [skillOverrides, setSkillOverrides] = useState({});
+  const [techStackOverrides, setTechStackOverrides] = useState({});
   const [summaryOverride, setSummaryOverride] = useState(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -79,6 +80,7 @@ export default function ResumeConfiguration() {
           setDisplayName(prefs.display_name || defaultName);
           setBulletOverrides(prefs.bullets || {});
           setSkillOverrides(prefs.skill_categories || {});
+          setTechStackOverrides(prefs.tech_stacks || {});
           setSummaryOverride(prefs.summary || null);
         }
       })
@@ -108,6 +110,17 @@ export default function ResumeConfiguration() {
     setSaved(false);
   }, []);
 
+  const toggleTechStack = useCallback((company, currentEffective, defaultStatus = 'LOCKED') => {
+    const next = currentEffective === 'LOCKED' ? 'EDITABLE' : 'LOCKED';
+    setTechStackOverrides(prev => {
+      const updated = { ...prev };
+      if (next === defaultStatus) delete updated[company];
+      else updated[company] = next;
+      return updated;
+    });
+    setSaved(false);
+  }, []);
+
   const toggleSummary = useCallback((currentEffective, defaultStatus = 'EDITABLE') => {
     const next = currentEffective === 'LOCKED' ? 'EDITABLE' : 'LOCKED';
     setSummaryOverride(next === defaultStatus ? null : next);
@@ -124,6 +137,7 @@ export default function ResumeConfiguration() {
           display_name: displayName,
           bullets: bulletOverrides,
           skill_categories: skillOverrides,
+          tech_stacks: techStackOverrides,
           summary: summaryOverride,
         }),
       });
@@ -158,9 +172,10 @@ export default function ResumeConfiguration() {
   }, 0);
 
   const overrideCount = Object.keys(bulletOverrides).length + Object.keys(skillOverrides).length
-    + (summaryOverride !== null ? 1 : 0);
+    + Object.keys(techStackOverrides).length + (summaryOverride !== null ? 1 : 0);
   const lockedCount = Object.values(bulletOverrides).filter(v => v === 'LOCKED').length
     + Object.values(skillOverrides).filter(v => v === 'LOCKED').length
+    + Object.values(techStackOverrides).filter(v => v === 'LOCKED').length
     + (summaryOverride === 'LOCKED' ? 1 : 0);
 
   return (
@@ -279,12 +294,6 @@ export default function ResumeConfiguration() {
                           />
                         ))}
                       </div>
-                      {cleanLocked(entry.tech_stack) && (
-                        <div className="tech-stack-row">
-                          <span className="tech-stack-label">Tech Stack</span>
-                          <span className="tech-stack-items">{cleanLocked(entry.tech_stack)}</span>
-                        </div>
-                      )}
                     </div>
                   ))}
                 </div>
@@ -362,6 +371,37 @@ export default function ResumeConfiguration() {
 
             return null;
           })}
+
+          {/* Tech Stack section card */}
+          {expanded && (() => {
+            const expSec = sections.find(s => s.type === 'experience');
+            const techEntries = expSec
+              ? expSec.entries.filter(e => cleanLocked(e.tech_stack))
+              : [];
+            if (techEntries.length === 0) return null;
+            return (
+              <div className="card">
+                <h3 className="section-title">Tech Stack</h3>
+                <div className="bullets-list">
+                  {techEntries.map((entry, i) => {
+                    const company = cleanLocked(entry.company);
+                    const effective = techStackOverrides[company] ?? 'LOCKED';
+                    return (
+                      <div key={i} className={`bullet-row ${effective === 'LOCKED' ? 'bullet-row-locked' : ''}`}>
+                        <StatusBadge
+                          status={effective}
+                          onToggle={() => toggleTechStack(company, effective, 'LOCKED')}
+                        />
+                        <span className="bullet-text">
+                          <strong>{company}</strong>: {cleanLocked(entry.tech_stack)}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Floating save bar */}
           {expanded && !saved && overrideCount > 0 && (

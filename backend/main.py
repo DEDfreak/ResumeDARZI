@@ -784,6 +784,7 @@ def _apply_preferences(parsed: dict, preferences: dict) -> None:
     """Mutate parsed resume to apply user lock/edit overrides in-place."""
     bullet_overrides: dict = preferences.get("bullets", {})
     skill_overrides: dict = preferences.get("skill_categories", {})
+    tech_stack_overrides: dict = preferences.get("tech_stacks", {})
     summary_override: str | None = preferences.get("summary")
 
     for sec in parsed.get("sections", []):
@@ -795,6 +796,10 @@ def _apply_preferences(parsed: dict, preferences: dict) -> None:
                 for b in entry.get("bullets", []):
                     if b["id"] in bullet_overrides:
                         b["status"] = bullet_overrides[b["id"]]
+                if sec_type == "experience":
+                    company = entry.get("company", "").replace("LOCKED: ", "")
+                    if company in tech_stack_overrides:
+                        entry["tech_stack_status"] = tech_stack_overrides[company]
 
         elif sec_type == "skills":
             for skill in sec.get("skills", []):
